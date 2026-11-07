@@ -131,12 +131,14 @@ Sendung unter <http://localhost:8080>, Receiver unter <http://localhost:8090>. D
 
 ## Eigene Adresse
 
-Pi-hole, zwei A-Einträge auf die IP des Docker-Rechners:
+Pi-hole, A-Einträge auf die IP des Docker-Rechners:
 
-- `acpulse.mycloud.ag` — Hörerseite, Pult, Regie
-- `rec.acpulse.mycloud.ag` — Status des Receivers
+- `acpulse.mycloud.ag` — Hörerseite, Pult, Regie, und der Receiver unter `/receiver/`
+- `rec.acpulse.mycloud.ag` — dieselbe Receiver-Seite, nur mit eigenem Namen
 
-Die Hörer rufen den Receiver nicht auf. Die Sendung spricht ihn intern unter `http://receiver:8090` an. Ein Pfad wie `/receive` auf derselben Domain wäre ein zweites Routing vor den bestehenden Pfaden der Sendung. Die Subdomain lässt beides in Ruhe.
+Ein Eintrag für `acpulse.mycloud.ag` gilt nicht automatisch für `rec.acpulse.mycloud.ag`. Fehlt der zweite Eintrag, findet der Browser die Subdomain nicht. Dann die Seite unter `https://acpulse.mycloud.ag/receiver/` öffnen.
+
+Die Hörer rufen den Receiver nicht auf. Die Sendung spricht ihn intern unter `http://receiver:8090` an.
 
 Neben `docker-compose.yml` eine Datei `.env`, die nicht ins Repo gehört:
 

@@ -1,20 +1,33 @@
-# Hörerseite und Receiver hinter TLS.
-# Pi-hole zeigt beide Namen auf die IP dieses Rechners.
+# Hörerseite und Receiver hinter einem Zertifikat.
+# Pi-hole: ein A-Eintrag für acpulse.mycloud.ag reicht für die Hörerseite
+# und für https://acpulse.mycloud.ag/receiver/
+# rec.acpulse.mycloud.ag braucht einen zweiten A-Eintrag auf dieselbe IP.
+# Ein Eintrag nur für acpulse.mycloud.ag gilt nicht für die Subdomain.
 #
 # tls internal: Zertifikat von Caddy, nur im eigenen Netz gültig.
-# Die Warnung im Browser verschwindet, wenn das Root-Zertifikat aus
-# dem Volume caddy-data (pki/authorities/local/root.crt) auf den Geräten liegt.
+# Root-Zertifikat: Volume caddy-data, pki/authorities/local/root.crt
 #
-# Let's Encrypt statt dessen: die zwei Zeilen "tls internal" löschen.
+# Let's Encrypt: die Zeile "tls internal" löschen.
 # Dafür muss mycloud.ag öffentlich auflösen und Port 80 aus dem Internet
 # erreichbar sein. Pi-hole kann den Namen im LAN trotzdem auf die interne IP zeigen.
 
-acpulse.mycloud.ag {
+acpulse.mycloud.ag, rec.acpulse.mycloud.ag {
 	tls internal
-	reverse_proxy pulse:8080
-}
 
-rec.acpulse.mycloud.ag {
-	tls internal
-	reverse_proxy receiver:8090
+	@receiver host rec.acpulse.mycloud.ag
+	handle @receiver {
+		reverse_proxy receiver:8090
+	}
+
+	handle /receiver {
+		redir /receiver/ temporary
+	}
+
+	handle_path /receiver/* {
+		reverse_proxy receiver:8090
+	}
+
+	handle {
+		reverse_proxy pulse:8080
+	}
 }
