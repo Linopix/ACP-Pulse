@@ -2071,6 +2071,15 @@ async function deskView(sql: Sql, userId: string, name: string, role: DeskRole):
   await bootstrapStations(sql, userId);
   await bootstrapDesk(sql, userId);
   const services = await loadServices(sql);
+  const settings = await loadBaseSettings(sql);
+  const pb = await readPlayback(sql);
+  const air = await buildNow(sql, pb);
+  const next = await sql<Row>`
+    select title, artist from queue_items
+    where status = 'queued'
+    order by score desc, created_at asc, id asc
+    limit 3
+  `;
   return {
     me: { id: userId, name, role },
     recordings: await loadRecordings(sql),
@@ -2079,6 +2088,10 @@ async function deskView(sql: Sql, userId: string, name: string, role: DeskRole):
     plan: await loadPlan(sql),
     piperVoice: services.piper.voice,
     piperName: piperVoice(services.piper.voice).name,
+    air,
+    upNext: next.map((row) => ({ title: asText(row.title), artist: asText(row.artist) })),
+    volume: settings.volume,
+    outputLabel: outputLabel(settings.outputTarget, settings.sonosRoom),
   };
 }
 

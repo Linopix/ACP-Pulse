@@ -69,9 +69,35 @@ Die eingebaute Wortliste ist `DEFAULT_BLOCKLIST`. Die Regie ergänzt sie komma- 
 
 YouTube und Spotify sind Dienste unter Regie → Dienste, nicht nur ein Schalter. Ohne Zugangsdaten sucht YouTube öffentlich, Spotify bleibt stumm, bis Client-ID und Geheimnis da sind. `TrackInput` kennt weiter `source` und `externalId`.
 
-Microsoft 365 liest einen Kalender (App mit Calendars.Read oder ein ICS aus Outlook) in den Musikplan. Piper spricht Durchsagen mit Kerstin oder Eva, beides weiblich. Ohne Piper-Adresse auf dem Pi spricht der Browser, mit Adresse geht dieselbe Ansage als Datei an die Boxen.
+Microsoft 365 liest einen Kalender (App mit Calendars.Read oder ein ICS aus Outlook) in den Musikplan. Dieselbe App meldet das Team an, siehe unten. Piper spricht Durchsagen mit Kerstin oder Eva, beides weiblich. Ohne Piper-Adresse spricht der Browser, mit Adresse geht dieselbe Ansage als Datei an die Boxen.
 
-Der Musikplan setzt pro Block Lautstärke, Wünsche, Filter und Energie. Das Pult zeigt denselben Tag als Laufplan mit Stimmung, Sprechpunkten und der ausführlichen Notiz.
+## Piper einrichten
+
+Auf dem Rechner, der die Stimme sprechen soll (nicht im Pulse-Container):
+
+```bash
+sh scripts/install-piper.sh
+```
+
+Das Skript legt Piper und die Stimmen `de_DE-kerstin-low` und `de_DE-eva_k-x_low` nach `~/.local/share/acp-piper` und startet `scripts/piper-server.mjs` auf `0.0.0.0:5000`. `--no-start` installiert nur. Gesundheit: `GET /health`. Ansage: `POST /` mit JSON `{ "text", "voice" }`, Antwort `audio/wav`.
+
+In der Regie unter Dienste → Piper die Adresse eintragen. Läuft Pulse in Docker, ist `127.0.0.1` der Container, nicht der Rechner. Compose kennt `host.docker.internal`, die Adresse ist dann `http://host.docker.internal:5000`. Ohne Docker reicht `http://127.0.0.1:5000`.
+
+## Microsoft-Anmeldung
+
+Dieselbe App-Registrierung wie der Kalender. In Entra ID:
+
+1. App-Registrierung, ein Mandant. Plattform **Web**.
+2. Umleitungs-URI exakt `https://<öffentliche-adresse>/api/microsoft/callback`, zum Beispiel `https://acpulse.mycloud.ag/api/microsoft/callback`.
+3. Geheimer Clientschlüssel. Den Wert nur einmal anzeigen lassen und in der Regie eintragen. Leer lassen behält den alten.
+4. API-Berechtigungen: delegiert `openid`, `profile`, `email`. Als Anwendung `Calendars.Read`, dann Administratorzustimmung.
+5. In der Regie unter Dienste → Microsoft 365 einschalten: Mandant (`firma.onmicrosoft.com` oder die Mandanten-ID), Client-ID, Geheimnis, Postfach für den Kalender.
+
+`BETTER_AUTH_URL` muss genau diese öffentliche HTTPS-Adresse sein. Die Umleitung und das Sitzungs-Cookie hängen daran. Ohne HTTPS legt der Browser das Cookie nicht ab, außer auf localhost.
+
+«Mit Microsoft anmelden» legt das Konto nach der E-Mail an oder verknüpft ein bestehendes. Die erste Person ohne Regie wird Regie. Ein gesperrtes Konto kommt nicht hinein. Schlägt es fehl, steht der Grund auf der Anmeldeseite.
+
+Der Musikplan setzt pro Block Lautstärke, Wünsche, Filter und Energie. Das Pult zeigt denselben Tag als Konsole: oben was läuft, die Uhr und die Lautstärke, darunter das Mikrofon und der aktuelle Block, rechts Sender, Aufnahmen und die nächsten Wünsche.
 
 ## Ausgabe
 
@@ -179,10 +205,13 @@ npm run typecheck
 | `src/brand.ts` | Name, Farben, Schriften, Radien |
 | `src/lib/pulse/logic.ts` | Stimmen, Filter, Aufräumen, YouTube-Link, Rollen |
 | `src/lib/pulse/api.ts` | Serverfunktionen, Playback, Dispatch |
+| `src/lib/pulse/microsoft.ts` | Anmeldung über Entra, ohne die Auth-Konfiguration anzufassen |
 | `src/lib/pulse/cues.ts` | Kennungen nur im Browser, nicht auf Sendung |
 | `src/lib/pulse/types.ts` | Snapshots, die die Oberfläche bekommt |
 | `src/components/pulse-station.tsx` | Sendung |
 | `src/components/pulse-dj.tsx` | Pult |
+| `scripts/install-piper.sh` | Piper und die Stimmen Kerstin, Eva |
+| `scripts/piper-server.mjs` | Sprachdienst, JSON rein, WAV raus |
 | `src/components/pulse-admin.tsx` | Regie |
 | `src/components/pulse-guide.tsx` | Führung |
 | `src/components/pulse-ui.tsx` | Leiste, Flächen, Knöpfe |

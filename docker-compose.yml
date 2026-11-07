@@ -25,6 +25,8 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
     volumes:
       - pulse-data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - receiver
 

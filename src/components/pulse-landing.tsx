@@ -61,11 +61,21 @@ export function AuthSkeleton() {
 export function AuthCard() {
   const router = useRouter();
   const [mode, setMode] = useState<"in" | "up">("in");
+  const [notice, setNotice] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get("microsoft");
+    if (!code) return;
+    setNotice(microsoftNotice(code));
+    const url = new URL(window.location.href);
+    url.searchParams.delete("microsoft");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }, []);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -97,6 +107,11 @@ export function AuthCard() {
             ? "Die erste Person wird Regie. Alle weiteren hören mit und können wünschen."
             : "Mit dem Firmenkonto in die laufende Sendung."}
         </p>
+        {notice ? (
+          <p className="text-sm text-danger" role="alert">
+            {notice}
+          </p>
+        ) : null}
         {emailAndPasswordEnabled ? (
           <form className="grid gap-3" onSubmit={(event) => void onSubmit(event)}>
             {mode === "up" ? (
@@ -151,6 +166,9 @@ export function AuthCard() {
         ) : null}
         <div className="grid gap-2">
           {emailAndPasswordEnabled ? <p className="text-xs text-subtle">oder</p> : null}
+          <Button variant="line" onClick={() => window.location.assign("/api/microsoft/start")}>
+            Mit Microsoft anmelden
+          </Button>
           {GROK_PROVIDERS.map((provider) => (
             <Button
               key={provider.providerId}
@@ -173,4 +191,13 @@ function localAuthError(message: string): string {
   if (text.includes("password")) return "Das Passwort muss mindestens 8 Zeichen haben.";
   if (text.includes("invalid") || text.includes("credential")) return "E-Mail oder Passwort passt nicht.";
   return message || "Anmeldung fehlgeschlagen.";
+}
+
+function microsoftNotice(code: string): string {
+  if (code === "fehlt") return "Microsoft ist in der Regie noch nicht eingeschaltet. Mandant, Client-ID und Geheimnis fehlen.";
+  if (code === "state") return "Die Microsoft-Anmeldung ist abgelaufen. Bitte erneut.";
+  if (code === "token") return "Microsoft hat die Anmeldung abgelehnt. Redirect-URI und Geheimnis prüfen.";
+  if (code === "mail") return "Microsoft hat keine E-Mail-Adresse geliefert.";
+  if (code === "gesperrt") return "Dieses Konto ist gesperrt.";
+  return "Anmeldung über Microsoft ist gerade nicht möglich.";
 }

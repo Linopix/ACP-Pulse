@@ -113,8 +113,9 @@ function OfficeCard({ services, onSaved }: { services: ServiceState; onSaved: (n
   return (
     <Panel title="Microsoft 365">
       <p className="mb-3 text-sm text-muted">
-        App-Registrierung mit Calendars.Read, Client Secret, und das Postfach, dessen Kalender in den Musikplan soll.
-        Termine der nächsten zwei Tage werden Blöcke, mit Lautstärke-Wunsch aus dem Text.
+        Dieselbe App-Registrierung für Kalender und Anmeldung. Delegiert: openid, profile, email. Als Anwendung: Calendars.Read,
+        mit Administratorzustimmung. Plattform Web, Redirect-URI https://öffentliche-adresse/api/microsoft/callback. Das Postfach
+        liefert die Termine der nächsten zwei Tage in den Musikplan, inklusive Lautstärke aus dem Text.
       </p>
       <Status detail={services.o365.detail} />
       <form
@@ -130,7 +131,7 @@ function OfficeCard({ services, onSaved }: { services: ServiceState; onSaved: (n
             .catch((caught) => toast.error(errorText(caught)));
         }}
       >
-        <Toggle checked={enabled} onChange={setEnabled} label="Kalender darf gelesen werden" />
+        <Toggle checked={enabled} onChange={setEnabled} label="Kalender und Anmeldung" />
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Mandant">
             <input className={fieldClass} value={tenant} onChange={(event) => setTenant(event.target.value)} placeholder="firma.onmicrosoft.com" />
@@ -164,8 +165,9 @@ function PiperCard({ services, onSaved }: { services: ServiceState; onSaved: (ne
   return (
     <Panel title="Piper">
       <p className="mb-3 text-sm text-muted">
-        Weibliche Sendestimme. {current.name}, {current.detail}. Im Browser spricht die deutsche Frauenstimme dieses
-        Profil. Liegt die Piper-Adresse eines Pi vor, kommt dieselbe Ansage als Datei auf Sonos und Receiver.
+        Weibliche Sendestimme. {current.name}, {current.detail}. Ohne Adresse spricht der Browser. Mit Adresse kommt dieselbe
+        Ansage als Datei auf Sonos und Receiver. Das Installationsskript legt Kerstin und Eva auf den Rechner und startet den
+        Dienst auf Port 5000. Aus dem Container ist das nicht 127.0.0.1, sondern http://host.docker.internal:5000.
       </p>
       <Status detail={services.piper.detail} />
       <form
@@ -191,7 +193,7 @@ function PiperCard({ services, onSaved }: { services: ServiceState; onSaved: (ne
           </select>
         </Field>
         <Field label="Piper-Adresse" hint="Leer: nur Browser. Sonst POST mit Text und Stimme, Antwort audio/wav.">
-          <input className={fieldClass} value={endpoint} placeholder="http://piper.local:5000" onChange={(event) => setEndpoint(event.target.value)} />
+          <input className={fieldClass} value={endpoint} placeholder="http://host.docker.internal:5000" onChange={(event) => setEndpoint(event.target.value)} />
         </Field>
         <div className="flex flex-wrap gap-2">
           <Button type="submit">Speichern</Button>

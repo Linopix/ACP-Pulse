@@ -278,7 +278,7 @@ export function CueRail() {
 
 export function CueTarget({ id, children }: { id: string; children: ReactNode }) {
   return (
-    <div id={id} className="scroll-mt-36">
+    <div id={id} className="min-w-0 scroll-mt-36">
       {children}
     </div>
   );

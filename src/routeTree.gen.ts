@@ -14,6 +14,8 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as DjRouteImport } from './routes/dj'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiMicrosoftCallbackRouteImport } from './routes/api/microsoft/callback'
+import { Route as ApiMicrosoftStartRouteImport } from './routes/api/microsoft/start'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -40,6 +42,16 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiMicrosoftCallbackRoute = ApiMicrosoftCallbackRouteImport.update({
+  id: '/api/microsoft/callback',
+  path: '/api/microsoft/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMicrosoftStartRoute = ApiMicrosoftStartRouteImport.update({
+  id: '/api/microsoft/start',
+  path: '/api/microsoft/start',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -47,6 +59,8 @@ export interface FileRoutesByFullPath {
   '/dj': typeof DjRoute
   '/login': typeof LoginRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/microsoft/callback': typeof ApiMicrosoftCallbackRoute
+  '/api/microsoft/start': typeof ApiMicrosoftStartRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -54,6 +68,8 @@ export interface FileRoutesByTo {
   '/dj': typeof DjRoute
   '/login': typeof LoginRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/microsoft/callback': typeof ApiMicrosoftCallbackRoute
+  '/api/microsoft/start': typeof ApiMicrosoftStartRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -62,13 +78,37 @@ export interface FileRoutesById {
   '/dj': typeof DjRoute
   '/login': typeof LoginRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/microsoft/callback': typeof ApiMicrosoftCallbackRoute
+  '/api/microsoft/start': typeof ApiMicrosoftStartRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/dj' | '/login' | '/api/auth/$'
+  fullPaths:
+    | '/'
+    | '/admin'
+    | '/dj'
+    | '/login'
+    | '/api/auth/$'
+    | '/api/microsoft/callback'
+    | '/api/microsoft/start'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/dj' | '/login' | '/api/auth/$'
-  id: '__root__' | '/' | '/admin' | '/dj' | '/login' | '/api/auth/$'
+  to:
+    | '/'
+    | '/admin'
+    | '/dj'
+    | '/login'
+    | '/api/auth/$'
+    | '/api/microsoft/callback'
+    | '/api/microsoft/start'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/dj'
+    | '/login'
+    | '/api/auth/$'
+    | '/api/microsoft/callback'
+    | '/api/microsoft/start'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -77,6 +117,8 @@ export interface RootRouteChildren {
   DjRoute: typeof DjRoute
   LoginRoute: typeof LoginRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiMicrosoftCallbackRoute: typeof ApiMicrosoftCallbackRoute
+  ApiMicrosoftStartRoute: typeof ApiMicrosoftStartRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -116,6 +158,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/microsoft/callback': {
+      id: '/api/microsoft/callback'
+      path: '/api/microsoft/callback'
+      fullPath: '/api/microsoft/callback'
+      preLoaderRoute: typeof ApiMicrosoftCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/microsoft/start': {
+      id: '/api/microsoft/start'
+      path: '/api/microsoft/start'
+      fullPath: '/api/microsoft/start'
+      preLoaderRoute: typeof ApiMicrosoftStartRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -125,6 +181,8 @@ const rootRouteChildren: RootRouteChildren = {
   DjRoute: DjRoute,
   LoginRoute: LoginRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiMicrosoftCallbackRoute: ApiMicrosoftCallbackRoute,
+  ApiMicrosoftStartRoute: ApiMicrosoftStartRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

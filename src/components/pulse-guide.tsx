@@ -57,7 +57,7 @@ function stepsFor(role: DeskRole) {
   if (role === "dj" || role === "admin") {
     steps.push({
       title: "Pult",
-      body: "Oben dieselbe Leiste: 01 Sendung, 02 Pult, 03 Regie. Im Pult springst du zu Laufplan, Stimme, Mikrofon, Aufnahmen, Sender und Kennung. Mikrofon und Piper unterbrechen die Musik.",
+      body: "Oben dieselbe Leiste: 01 Sendung, 02 Pult, 03 Regie. Das Pult zeigt zuerst, was läuft, dann das Mikrofon und den Laufplan. Rechts Sender, Aufnahmen und die Queue. Mikrofon und Piper unterbrechen die Musik.",
     });
   }
   if (role === "admin") {

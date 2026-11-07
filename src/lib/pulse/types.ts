@@ -235,6 +235,10 @@ export type DeskSnapshot = {
   plan: PlanBlock[];
   piperVoice: PiperVoiceId;
   piperName: string;
+  air: PlaybackView;
+  upNext: { title: string; artist: string }[];
+  volume: number;
+  outputLabel: string;
 };
 
 export type AdminSnapshot = {
