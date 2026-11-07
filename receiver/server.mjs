@@ -407,10 +407,15 @@ function page() {
   const arm = document.getElementById("arm");
   let armed = false;
   let key = "";
+  let playingId = "";
   let player = null;
   arm.addEventListener("click", () => {
     armed = true;
     arm.hidden = true;
+    if (player && player.playVideo) {
+      player.playVideo();
+      return;
+    }
     key = "";
     void tick();
   });
@@ -421,6 +426,7 @@ function page() {
   function clearStage() {
     if (player && player.destroy) player.destroy();
     player = null;
+    playingId = "";
     stage.innerHTML = "";
     stage.appendChild(idle);
     idle.hidden = false;
@@ -428,14 +434,26 @@ function page() {
   function mountYoutube(id, start, volume) {
     idle.hidden = true;
     file.pause();
+    if (playingId === id && player) {
+      if (player.setVolume) player.setVolume(volume);
+      if (player.seekTo) player.seekTo(Math.floor(start), true);
+      if (armed && player.playVideo) player.playVideo();
+      return;
+    }
     if (player && player.destroy) player.destroy();
+    playingId = id;
     const slot = document.createElement("div");
     stage.innerHTML = "";
     stage.appendChild(slot);
     player = new YT.Player(slot, {
       videoId: id,
-      playerVars: { autoplay: armed ? 1 : 0, start: Math.floor(start), rel: 0 },
-      events: { onReady(event) { event.target.setVolume(volume); if (armed) event.target.playVideo(); } }
+      playerVars: { autoplay: armed ? 1 : 0, start: Math.floor(start), rel: 0, playsinline: 1 },
+      events: {
+        onReady(event) {
+          event.target.setVolume(volume);
+          if (armed) event.target.playVideo();
+        },
+      },
     });
   }
   async function tick() {
@@ -451,6 +469,11 @@ function page() {
       const next = (now.youtubeId || "") + "|" + (now.url || "") + "|" + (now.at || "");
       const tube = /^[\\w-]{6,20}$/.test(now.youtubeId || "");
       if (tube && !(window.YT && YT.Player)) return;
+      if (tube && playingId === now.youtubeId && player) {
+        key = next;
+        if (player.setVolume) player.setVolume(vol);
+        return;
+      }
       if (next === key) {
         if (player && player.setVolume) player.setVolume(vol);
         return;

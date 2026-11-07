@@ -151,7 +151,16 @@ function NowPlaying({
   return (
     <Panel>
       <div className="grid w-full min-w-0 grid-cols-1 gap-5 sm:grid-cols-[11rem_minmax(0,1fr)] sm:items-center">
-        <Cover url={air.artworkUrl} title={air.title} live={air.mode !== "idle"} youtubeId={air.youtubeId} startAt={air.startedAt} armed={player.ytArmed} />
+        <Cover
+          url={air.artworkUrl}
+          title={air.title}
+          live={air.mode !== "idle"}
+          youtubeId={audible ? air.youtubeId : ""}
+          startAt={air.startedAt}
+          armed={player.ytArmed}
+          volume={player.muted ? 0 : snap.volume}
+          onArm={() => void player.start()}
+        />
         <div className="grid min-w-0 gap-3">
           <div className="flex items-center gap-3 text-sm text-muted">
             <Eq live={air.mode !== "idle"} />
@@ -181,7 +190,7 @@ function NowPlaying({
             >
               {player.muted ? "Ton an" : "Leise hier"}
             </Button>
-            {player.blocked && audible ? (
+            {player.blocked && audible && !air.youtubeId ? (
               <Button onClick={() => void player.start()}>Sendung hören</Button>
             ) : null}
             {isDesk(snap.me.role) && air.mode !== "idle" ? (
@@ -211,34 +220,91 @@ function Cover({
   youtubeId,
   startAt,
   armed,
+  volume,
+  onArm,
 }: {
   url: string;
   title: string;
   live: boolean;
   youtubeId?: string;
   startAt?: string | null;
-  armed?: boolean;
+  armed: boolean;
+  volume: number;
+  onArm: () => void;
 }) {
-  const start = startAt ? Math.max(0, Math.floor((Date.now() - new Date(startAt).getTime()) / 1000)) : 0;
+  const frame = useRef<HTMLIFrameElement>(null);
+  const armedRef = useRef(armed);
+  const volumeRef = useRef(volume);
+  const [src, setSrc] = useState("");
+  armedRef.current = armed;
+  volumeRef.current = volume;
+
+  useEffect(() => {
+    if (!youtubeId) {
+      setSrc("");
+      return;
+    }
+    const elapsed = startAt ? Math.max(0, Math.floor((Date.now() - new Date(startAt).getTime()) / 1000)) : 0;
+    const origin = window.location.origin;
+    const next = new URL(`https://www.youtube.com/embed/${youtubeId}`);
+    next.searchParams.set("enablejsapi", "1");
+    next.searchParams.set("rel", "0");
+    next.searchParams.set("modestbranding", "1");
+    next.searchParams.set("playsinline", "1");
+    next.searchParams.set("start", String(elapsed));
+    next.searchParams.set("origin", origin);
+    setSrc(next.toString());
+  }, [youtubeId, startAt]);
+
+  useEffect(() => {
+    postYt(frame.current, "setVolume", [volume]);
+  }, [volume, src]);
+
   return (
     <div className="relative aspect-square w-full min-w-0 max-w-full overflow-hidden rounded-md bg-surface-2">
-      {youtubeId ? (
+      {src ? (
         <iframe
-          key={`${youtubeId}-${armed ? "on" : "off"}`}
+          ref={frame}
+          id="pulse-yt"
           title={title}
-          src={`https://www.youtube-nocookie.com/embed/${youtubeId}?rel=0&start=${start}${armed ? "&autoplay=1" : ""}`}
-          allow="autoplay; encrypted-media"
+          src={src}
+          allow="autoplay; encrypted-media; picture-in-picture"
           className="h-full max-h-full w-full max-w-full"
+          onLoad={() => {
+            postYt(frame.current, "setVolume", [volumeRef.current]);
+            if (armedRef.current) postYt(frame.current, "playVideo");
+          }}
         />
       ) : null}
-      {url && !youtubeId ? <img src={url} alt="" className="h-full max-h-full w-full max-w-full min-w-0 object-cover" /> : null}
-      <div className={cn("absolute inset-0 grid place-items-center", (url || youtubeId) && "hidden")}>
+      {url && !src ? <img src={url} alt="" className="h-full max-h-full w-full max-w-full min-w-0 object-cover" /> : null}
+      {src && !armed ? (
+        <div className="absolute inset-0 grid place-items-center bg-surface/80">
+          <Button
+            type="button"
+            onClick={() => {
+              postYt(frame.current, "setVolume", [volumeRef.current]);
+              postYt(frame.current, "playVideo");
+              onArm();
+            }}
+          >
+            Ton an
+          </Button>
+        </div>
+      ) : null}
+      <div className={cn("absolute inset-0 grid place-items-center", (url || src) && "hidden")}>
         {!url && !youtubeId ? (
           <span className="px-4 text-center font-display text-2xl text-muted">{live ? title : "Pulse"}</span>
         ) : null}
       </div>
     </div>
   );
+}
+
+function postYt(frame: HTMLIFrameElement | null, func: string, args: unknown[] = []) {
+  const win = frame?.contentWindow;
+  if (!win) return;
+  win.postMessage(JSON.stringify({ event: "listening", id: "pulse-yt", channel: "widget" }), "*");
+  win.postMessage(JSON.stringify({ event: "command", func, args }), "*");
 }
 
 function Queue({ snap, onChange }: { snap: StationSnapshot; onChange: (snap: StationSnapshot) => void }) {
@@ -503,12 +569,14 @@ function useAir(
   const [muted, setMuted] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [ytArmed, setYtArmed] = useState(false);
+  const armedRef = useRef(false);
 
   const start = useCallback(async () => {
     void cue("ident");
     const audio = audioRef.current;
-    setBlocked(false);
+    armedRef.current = true;
     setYtArmed(true);
+    setBlocked(false);
     if (air.youtubeId) return;
     if (air.mode === "announcement" && air.recordingId) {
       await playClip(air.recordingId, audio, setBlocked);
@@ -541,8 +609,7 @@ function useAir(
     window.speechSynthesis?.cancel();
     if (air.youtubeId) {
       audio.pause();
-      setBlocked(true);
-      setYtArmed(false);
+      setBlocked(!armedRef.current);
       return;
     }
     if (!audible || muted) {
