@@ -362,7 +362,7 @@ function Cue() {
   const [pending, setPending] = useState(false);
   return (
     <Panel title="Andere Quelle">
-      <p className="mb-3 text-sm text-muted">YouTube nur in den Browsern. Eine Audiodatei geht mit an den Receiver.</p>
+      <p className="mb-3 text-sm text-muted">YouTube spielt in den Browsern und auf der Receiver-Seite. Eine Audiodatei geht auch an Sonos.</p>
       <form
         className="flex gap-2"
         onSubmit={(event) => {

@@ -262,6 +262,247 @@ async function itunesPreview(artist: string, title: string): Promise<string> {
   }
 }
 
+const BROWSE = "https://www.youtube.com/youtubei/v1/browse?prettyPrint=false";
+
+/** Öffentliche YouTube-Playlist. Nur Titel zwischen 75 Sekunden und 12 Minuten. */
+export async function youtubePlaylist(playlistId: string): Promise<{ title: string; tracks: TrackInput[] }> {
+  const id = playlistId.trim();
+  if (!/^[\w-]{13,80}$/.test(id)) throw new Error("Das ist keine YouTube-Playlist.");
+  const res = await fetch(BROWSE, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      context: { client: { clientName: "WEB", clientVersion: "2.20241126.01.00", hl: "en", gl: "US" } },
+      browseId: `VL${id}`,
+    }),
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new Error("YouTube-Playlist gerade nicht erreichbar.");
+  const body = (await res.json()) as {
+    metadata?: { playlistMetadataRenderer?: { title?: string } };
+    contents?: {
+      twoColumnBrowseResultsRenderer?: {
+        tabs?: {
+          tabRenderer?: {
+            content?: {
+              sectionListRenderer?: {
+                contents?: { itemSectionRenderer?: { contents?: { lockupViewModel?: Lockup }[] } }[];
+              };
+            };
+          };
+        }[];
+      };
+    };
+  };
+  const title = clip(body.metadata?.playlistMetadataRenderer?.title, 60) || "YouTube-Playlist";
+  const items =
+    body.contents?.twoColumnBrowseResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents?.[0]
+      ?.itemSectionRenderer?.contents ?? [];
+  const tracks: TrackInput[] = [];
+  for (const item of items) {
+    const lock = item.lockupViewModel;
+    if (!lock || lock.contentType !== "LOCKUP_CONTENT_TYPE_VIDEO") continue;
+    const videoId = lock.contentId ?? "";
+    const name = clip(lock.metadata?.lockupMetadataViewModel?.title?.content, 140);
+    if (!/^[\w-]{6,20}$/.test(videoId) || !name) continue;
+    const durationMs = durationFromLabel(lock.rendererContext?.accessibilityContext?.label ?? "");
+    if (durationMs < 75_000 || durationMs > 12 * 60_000) continue;
+    tracks.push(
+      track({
+        title: name,
+        artist: clip(lockArtist(lock), 140) || "YouTube",
+        artworkUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+        externalId: videoId,
+        durationMs,
+        source: "youtube",
+      }),
+    );
+    if (tracks.length >= 12) break;
+  }
+  if (tracks.length === 0) throw new Error("Die Playlist hat keine Titel in passender Länge.");
+  return { title, tracks };
+}
+
+type Lockup = {
+  contentId?: string;
+  contentType?: string;
+  metadata?: {
+    lockupMetadataViewModel?: {
+      title?: { content?: string };
+      image?: { decoratedAvatarViewModel?: { a11yLabel?: string } };
+      metadata?: { contentMetadataViewModel?: { metadataRows?: unknown[] } };
+    };
+  };
+  rendererContext?: { accessibilityContext?: { label?: string } };
+};
+
+function lockArtist(lock: Lockup): string {
+  const channel = (lock.metadata?.lockupMetadataViewModel?.image?.decoratedAvatarViewModel?.a11yLabel ?? "")
+    .replace(/^Go to channel\s+/i, "")
+    .trim();
+  if (channel.length > 1) return channel;
+  const found: string[] = [];
+  collectText(lock.metadata?.lockupMetadataViewModel?.metadata, found, 0);
+  const title = lock.metadata?.lockupMetadataViewModel?.title?.content ?? "";
+  return found.find((text) => text !== title && text.length > 1 && !/^\d/.test(text)) ?? "";
+}
+
+function collectText(node: unknown, out: string[], depth: number) {
+  if (node == null || depth > 6 || out.length > 8) return;
+  if (typeof node === "string") {
+    const text = node.replace(/\s+/g, " ").trim();
+    if (text) out.push(text);
+    return;
+  }
+  if (Array.isArray(node)) {
+    for (const item of node) collectText(item, out, depth + 1);
+    return;
+  }
+  if (typeof node === "object") {
+    for (const value of Object.values(node as Record<string, unknown>)) collectText(value, out, depth + 1);
+  }
+}
+
+function durationFromLabel(label: string): number {
+  const hour = /(\d+)\s+hours?/.exec(label);
+  const minute = /(\d+)\s+minutes?/.exec(label);
+  const second = /(\d+)\s+seconds?/.exec(label);
+  const total =
+    (hour ? Number(hour[1]) * 3600 : 0) + (minute ? Number(minute[1]) * 60 : 0) + (second ? Number(second[1]) : 0);
+  return total > 0 ? total * 1000 : 0;
+}
+
+/** Öffentliche Spotify-Playlist über die Embed-Seite. Ton über YouTube, sonst 30s-Vorschau. */
+export async function spotifyPlaylist(playlistId: string): Promise<{ title: string; tracks: TrackInput[] }> {
+  const id = playlistId.trim();
+  if (!/^[A-Za-z0-9]{10,40}$/.test(id)) throw new Error("Das ist keine Spotify-Playlist.");
+  const res = await fetch(`https://open.spotify.com/embed/playlist/${id}`, {
+    headers: { accept: "text/html", "user-agent": "ACP-Pulse" },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new Error("Spotify-Playlist gerade nicht erreichbar.");
+  const html = await res.text();
+  const raw = html.match(/<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/)?.[1];
+  if (!raw) throw new Error("Spotify hat die Playlist nicht hergegeben.");
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    throw new Error("Spotify hat die Playlist nicht hergegeben.");
+  }
+  const title = clip(playlistName(data, 0), 60) || "Spotify-Playlist";
+  const rows: { title: string; artist: string; durationMs: number; explicit: boolean; id: string }[] = [];
+  collectSpotify(data, 0, rows);
+  if (rows.length === 0) throw new Error("Die Spotify-Playlist ist leer oder nicht öffentlich.");
+  const tracks = await mapPool(rows.slice(0, 8), 3, (row) => spotifyRowToTrack(row));
+  const playable = tracks.filter((item): item is TrackInput => item !== null);
+  if (playable.length === 0) throw new Error("Keiner der Titel ließ sich abspielen.");
+  return { title, tracks: playable };
+}
+
+async function spotifyRowToTrack(row: {
+  title: string;
+  artist: string;
+  durationMs: number;
+  explicit: boolean;
+  id: string;
+}): Promise<TrackInput | null> {
+  try {
+    const hits = await searchYoutube(`${row.artist} ${row.title}`, "");
+    const hit = hits.find((item) => item.durationMs >= 75_000 && item.durationMs <= 12 * 60_000) ?? hits[0];
+    if (hit) {
+      return track({
+        title: row.title,
+        artist: row.artist,
+        album: "Spotify",
+        artworkUrl: hit.artworkUrl,
+        externalId: hit.externalId,
+        explicit: row.explicit,
+        durationMs: hit.durationMs || Math.min(row.durationMs || 180_000, 12 * 60_000),
+        source: "youtube",
+      });
+    }
+  } catch {
+    // Vorschau als Ersatz
+  }
+  const preview = await itunesPreview(row.artist, row.title);
+  if (!preview) return null;
+  return track({
+    title: row.title,
+    artist: row.artist,
+    album: "Spotify",
+    previewUrl: preview,
+    externalId: row.id,
+    explicit: row.explicit,
+    durationMs: 30_000,
+    source: "spotify",
+  });
+}
+
+function playlistName(node: unknown, depth: number): string {
+  if (node == null || depth > 12) return "";
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = playlistName(item, depth + 1);
+      if (found) return found;
+    }
+    return "";
+  }
+  if (typeof node !== "object") return "";
+  const rec = node as Record<string, unknown>;
+  const uri = typeof rec.uri === "string" ? rec.uri : "";
+  if ((uri.startsWith("spotify:playlist:") || rec.type === "playlist") && typeof rec.name === "string") {
+    return rec.name;
+  }
+  for (const value of Object.values(rec)) {
+    const found = playlistName(value, depth + 1);
+    if (found) return found;
+  }
+  return "";
+}
+
+function collectSpotify(
+  node: unknown,
+  depth: number,
+  out: { title: string; artist: string; durationMs: number; explicit: boolean; id: string }[],
+) {
+  if (node == null || depth > 12 || out.length >= 12) return;
+  if (Array.isArray(node)) {
+    for (const item of node) collectSpotify(item, depth + 1, out);
+    return;
+  }
+  if (typeof node !== "object") return;
+  const rec = node as Record<string, unknown>;
+  const uri = typeof rec.uri === "string" ? rec.uri : "";
+  const id = uri.startsWith("spotify:track:") ? uri.slice("spotify:track:".length) : "";
+  const title = clip(rec.title, 140);
+  const artist = clip(rec.subtitle, 140);
+  if (id && /^[A-Za-z0-9]{10,40}$/.test(id) && title && artist) {
+    out.push({
+      title,
+      artist,
+      durationMs: Math.max(0, Number(rec.duration) || 0),
+      explicit: rec.explicit === true || rec.isExplicit === true,
+      id,
+    });
+  }
+  for (const value of Object.values(rec)) collectSpotify(value, depth + 1, out);
+}
+
+async function mapPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      out[index] = await fn(items[index]!);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
+  return out;
+}
+
 export async function graphToken(tenant: string, clientId: string, secret: string): Promise<string> {
   const url = `https://login.microsoftonline.com/${encodeURIComponent(tenant)}/oauth2/v2.0/token`;
   const body = new URLSearchParams({

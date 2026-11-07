@@ -29,7 +29,7 @@ Eine Zeile in `playback` ist die gemeinsame Uhr. `advancePlayback` in [`src/lib/
 4. **Hausplaylist.** Die Playlist mit `is_fallback`. Läuft im Kreis, wenn die Queue leer ist.
 5. **Leerlauf.** Kein spielbarer Titel.
 
-YouTube bleibt im Browser (nocookie-iframe). Eine direkte `http(s)`-Audiodatei geht auch an Sonos oder den Receiver.
+YouTube spielt im Browser und auf der Receiver-Seite (nocookie-iframe). Eine direkte `http(s)`-Audiodatei geht auch an Sonos. Sonos bekommt kein YouTube.
 
 Schreibende Wege laufen durch eine Sperre (`withRadioLock`), damit zwei Wünsche die Queue nicht gleichzeitig umsortieren.
 
@@ -63,7 +63,7 @@ Die eingebaute Wortliste ist `DEFAULT_BLOCKLIST`. Die Regie ergänzt sie komma- 
 | --- | --- | --- |
 | `preview` | Suche «30s Vorschau» | iTunes-Vorschau, etwa 30 Sekunden |
 | `archive` | Suche «Ganze Titel» | Internet Archive, ganze MP3, ohne Abo |
-| `youtube` | Dienst «YouTube», Suche oder Link | oEmbed, Innertube oder API-Schlüssel. Nur Browser |
+| `youtube` | Dienst «YouTube», Suche, Link oder hinterlegte Playlist | oEmbed, Innertube oder API-Schlüssel. Browser und Receiver-Seite |
 | `link` | Pult, direkte Audiodatei | mp3, m4a, ogg, wav über https |
 | `spotify` | Dienst «Spotify» | Client Credentials. Metadaten von Spotify, Ton über Vorschau oder 30s-Ersatz |
 
@@ -79,11 +79,13 @@ Der Musikplan setzt pro Block Lautstärke, Wünsche, Filter und Energie. Das Pul
 | --- | --- |
 | `browser` | nur die offenen Clients |
 | `sonos` | SOAP an Host:1400, Raumname ist Anzeige |
-| `receiver` | derselbe JSON-Befehl, der Receiver spielt lokal |
+| `receiver` | die Receiver-Seite spielt YouTube und Audiodateien, Sonos nicht |
 
 `tryDispatch` schickt Play nur, wenn Ziel und Receiver-URL gesetzt sind, und nur einmal pro Beitrag. Schlägt der Ruf fehl, läuft die Sendung im Browser weiter und der nächste Takt versucht es erneut.
 
-Der Test-Receiver ([`receiver/server.mjs`](receiver/server.mjs)) nimmt dieselben Befehle an. Ohne erreichbares Sonos-Gerät antwortet ein Lautsprecher im Prozess und legt die SOAP-Umschläge ins Journal. Mit Gerät gehen `SetAVTransportURI`, `Play` und `SetVolume` an Port 1400.
+Der Test-Receiver ([`receiver/server.mjs`](receiver/server.mjs)) ist der Lautsprecher unter `/`. «Ton an» startet die Wiedergabe, `/v1/now` ist der aktuelle Beitrag. Ohne erreichbares Sonos-Gerät antwortet ein Testlautsprecher und legt die SOAP-Umschläge ins Journal. Mit Gerät gehen `SetAVTransportURI`, `Play` und `SetVolume` an Port 1400.
+
+Die Standardmusik sind die YouTube-Playlists Chill, Pop Charts, Fokus und Jazz. Ein Spotify- oder YouTube-Playlist-Link hängt unter Regie → Playlists dieselbe Liste an. Spotify-Titel werden über YouTube gespielt, sonst über eine 30-Sekunden-Vorschau.
 
 | Pfad | Bedeutung |
 | --- | --- |

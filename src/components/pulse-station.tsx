@@ -191,7 +191,7 @@ function NowPlaying({
             ) : null}
           </div>
           {air.youtubeId ? (
-            <p className="text-xs text-subtle">YouTube läuft nur hier im Browser, nicht über Sonos oder den Receiver.</p>
+            <p className="text-xs text-subtle">YouTube spielt hier und auf der Receiver-Seite, nicht auf Sonos.</p>
           ) : null}
           {air.live ? <p className="text-xs text-subtle">Livestream des Senders, ohne Vorspulen.</p> : null}
           {!audible ? (

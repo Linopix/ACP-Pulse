@@ -4,7 +4,7 @@
  * Eine Zeile in `playback` ist die gemeinsame Uhr. `advancePlayback` wählt den
  * nächsten Beitrag: Durchsage, Relais, Wunsch nach Score, sonst Hausplaylist.
  * `tryDispatch` schickt denselben Beitrag an Sonos oder den Receiver, wenn das
- * Ziel nicht der Browser ist. YouTube bleibt im Browser.
+ * Ziel nicht der Browser ist. YouTube spielt im Browser und auf der Receiver-Seite, nicht auf Sonos.
  *
  * Schreibende Wege laufen durch `withRadioLock`. Die reinen Entscheidungen
  * (Stimmen, Filter, Aufräumen) liegen in logic.ts.
@@ -30,13 +30,17 @@ import {
   voteBudget,
   wishFromText,
   wishesToPrune,
+  houseGenre,
+  HOUSE_GENRES,
+  spotifyPlaylistId,
   youtubeId,
+  youtubePlaylistId,
   type DeskRole,
   type FilterMode,
   type OutputTarget,
   type PiperVoiceId,
 } from "@/lib/pulse/logic";
-import { fetchPiper, graphEvents, graphToken, searchSpotify, searchYoutube, spotifyToken } from "@/lib/pulse/services";
+import { fetchPiper, graphEvents, graphToken, searchSpotify, searchYoutube, spotifyPlaylist, spotifyToken, youtubePlaylist } from "@/lib/pulse/services";
 import type {
   AdminSnapshot,
   AnnouncementRecord,
@@ -419,20 +423,20 @@ async function searchItunes(query: string): Promise<TrackInput[]> {
 let catalogAttemptAt = 0;
 
 async function bootstrapPlaylist(sql: Sql, userId: string) {
+  if (!genreBoot) {
+    genreBoot = ensureGenrePlaylists(sql, userId).catch((error) => {
+      genreBoot = null;
+      console.error("[pulse] Standardmusik", error);
+    });
+  }
+  await genreBoot;
+
   const fallback = await sql<Row>`select id from playlists where is_fallback = true order by id asc limit 1`;
   let playlistId = asNum(fallback[0]?.id);
   if (!playlistId) {
     const any = await sql<Row>`select id from playlists order by id asc limit 1`;
     playlistId = asNum(any[0]?.id);
     if (playlistId) await sql`update playlists set is_fallback = true where id = ${playlistId}`;
-  }
-  if (!playlistId) {
-    const inserted = await sql<Row>`
-      insert into playlists (name, is_fallback, created_by)
-      values ('Hausplaylist', true, ${userId})
-      returning id
-    `;
-    playlistId = asNum(inserted[0]?.id);
   }
   if (!playlistId) return;
 
@@ -456,17 +460,58 @@ async function bootstrapPlaylist(sql: Sql, userId: string) {
         null;
       if (!hit) continue;
       position += 1;
-      await sql`
-        insert into playlist_tracks (
-          playlist_id, title, artist, album, artwork_url, preview_url, source, external_id, explicit, position
-        ) values (
-          ${playlistId}, ${hit.title}, ${hit.artist}, ${hit.album}, ${hit.artworkUrl},
-          ${hit.previewUrl}, ${hit.source}, ${hit.externalId}, ${hit.explicit}, ${position}
-        )
-      `;
+      await insertPlaylistTrack(sql, playlistId, hit, position);
     }
   }
   await seedOpeningQueue(sql, playlistId);
+}
+
+let genreBoot: Promise<void> | null = null;
+
+async function ensureGenrePlaylists(sql: Sql, userId: string) {
+  const existing = await sql<Row>`select id, name, is_fallback from playlists`;
+  let createdChill = false;
+  for (const genre of HOUSE_GENRES) {
+    if (existing.some((row) => asText(row.name) === genre.name)) continue;
+    try {
+      const loaded = await youtubePlaylist(genre.playlistId);
+      const inserted = await sql<Row>`
+        insert into playlists (name, is_fallback, created_by)
+        values (${genre.name}, false, ${userId})
+        returning id
+      `;
+      const id = asNum(inserted[0]?.id);
+      if (!id) continue;
+      let position = 0;
+      for (const hit of loaded.tracks) {
+        position += 1;
+        await insertPlaylistTrack(sql, id, hit, position);
+      }
+      if (genre.id === "chill") createdChill = true;
+    } catch (error) {
+      console.error(`[pulse] ${genre.name}`, error);
+    }
+  }
+  if (!createdChill) return;
+  const fallback = await sql<Row>`select id, name from playlists where is_fallback = true order by id asc limit 1`;
+  const current = asText(fallback[0]?.name);
+  if (fallback[0] && current !== "Hausplaylist") return;
+  const chill = await sql<Row>`select id from playlists where name = 'Chill' order by id asc limit 1`;
+  const chillId = asNum(chill[0]?.id);
+  if (!chillId) return;
+  await sql`update playlists set is_fallback = false`;
+  await sql`update playlists set is_fallback = true where id = ${chillId}`;
+}
+
+async function insertPlaylistTrack(sql: Sql, playlistId: number, hit: TrackInput, position: number) {
+  await sql`
+    insert into playlist_tracks (
+      playlist_id, title, artist, album, artwork_url, preview_url, source, external_id, explicit, position, duration_ms
+    ) values (
+      ${playlistId}, ${hit.title}, ${hit.artist}, ${hit.album}, ${hit.artworkUrl},
+      ${hit.previewUrl}, ${hit.source}, ${hit.externalId}, ${hit.explicit}, ${position}, ${hit.durationMs}
+    )
+  `;
 }
 
 /** Einmalig, damit eine einzelne Person das Voting sofort ausprobieren kann. */
@@ -475,7 +520,7 @@ async function seedOpeningQueue(sql: Sql, playlistId: number) {
   if (asNum(total[0]?.n) > 0) return;
   const tracks = await sql<Row>`
     select * from playlist_tracks
-    where playlist_id = ${playlistId} and preview_url <> '' and explicit = false
+    where playlist_id = ${playlistId} and explicit = false and (preview_url <> '' or source = 'youtube')
     order by position asc, id asc
     limit 5
   `;
@@ -767,6 +812,7 @@ async function tryDispatch(sql: Sql) {
       body: JSON.stringify({
         mode: now.mode,
         url: now.audioUrl,
+        youtubeId: now.youtubeId,
         title: now.title,
         artist: now.subtitle,
         text: now.announcementBody,
@@ -873,6 +919,7 @@ async function buildNow(sql: Sql, pb: Row): Promise<PlaybackView> {
     const row = rows[0];
     if (row) {
       const track = trackFrom(row);
+      const youtube = track.source === "youtube" ? track.externalId : "";
       return {
         ...base,
         mode: "fallback",
@@ -880,9 +927,10 @@ async function buildNow(sql: Sql, pb: Row): Promise<PlaybackView> {
         title: track.title,
         subtitle: track.artist,
         artworkUrl: track.artworkUrl,
-        audioUrl: track.previewUrl,
+        audioUrl: youtube ? "" : track.previewUrl,
         via: asText(row.playlist_name) || "Hausplaylist",
         explicit: track.explicit,
+        youtubeId: youtube,
       };
     }
   }
@@ -1772,6 +1820,61 @@ export const addPlaylistTrack = createServerFn({ method: "POST" })
       return { ...admin, settings: base };
     });
   });
+
+export const importHouseLink = createServerFn({ method: "POST" })
+  .validator((input: { url?: string; genre?: string; asFallback?: boolean }) => {
+    const url = clip(input?.url, 300);
+    const genre = clip(input?.genre, 20);
+    if (!url && !genre) fail("Link oder Genre fehlt.");
+    return { url, genre, asFallback: input?.asFallback === true };
+  })
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    await requireAdmin(sql, context.userId);
+    const loaded = await loadHouseSource(data.genre, data.url);
+    return withRadioLock(async () => {
+      const found = await sql<Row>`select id from playlists where name = ${loaded.title} order by id asc limit 1`;
+      let playlistId = asNum(found[0]?.id);
+      if (!playlistId) {
+        const count = await sql<Row>`select count(*)::int as n from playlists`;
+        const inserted = await sql<Row>`
+          insert into playlists (name, is_fallback, created_by)
+          values (${loaded.title}, ${asNum(count[0]?.n) === 0}, ${context.userId})
+          returning id
+        `;
+        playlistId = asNum(inserted[0]?.id);
+      }
+      if (!playlistId) fail("Playlist konnte nicht angelegt werden.");
+      await sql`delete from playlist_tracks where playlist_id = ${playlistId}`;
+      let position = 0;
+      for (const hit of loaded.tracks) {
+        position += 1;
+        await insertPlaylistTrack(sql, playlistId, hit, position);
+      }
+      if (data.asFallback) {
+        await sql`update playlists set is_fallback = false`;
+        await sql`update playlists set is_fallback = true where id = ${playlistId}`;
+      }
+      const base = await loadBaseSettings(sql);
+      const admin = await loadAdmin(sql, context.userId);
+      return { ...admin, settings: base };
+    });
+  });
+
+async function loadHouseSource(genreId: string, url: string): Promise<{ title: string; tracks: TrackInput[] }> {
+  if (genreId) {
+    const genre = houseGenre(genreId);
+    if (!genre) fail("Dieses Genre gibt es nicht.");
+    const loaded = await youtubePlaylist(genre.playlistId);
+    return { title: genre.name, tracks: loaded.tracks };
+  }
+  const spotify = spotifyPlaylistId(url);
+  if (spotify) return spotifyPlaylist(spotify);
+  const youtube = youtubePlaylistId(url);
+  if (youtube) return youtubePlaylist(youtube);
+  fail("Das ist kein Spotify- oder YouTube-Playlist-Link.");
+}
 
 export const removePlaylistTrack = createServerFn({ method: "POST" })
   .validator((input: { id?: number }) => {

@@ -39,6 +39,8 @@ let nowPlaying = {
   room: "",
   volume: 40,
   at: "",
+  url: "",
+  youtubeId: "",
 };
 
 function escapeXml(value) {
@@ -204,6 +206,7 @@ async function handleCommand(body, { dryRun, volumeOnly }) {
   const title = String(body.title ?? "").slice(0, 180);
   const artist = String(body.artist ?? "").slice(0, 180);
   const url = String(body.url ?? "").slice(0, 500);
+  const youtubeId = /^[\w-]{6,20}$/.test(String(body.youtubeId ?? "")) ? String(body.youtubeId) : "";
   const room = String(body.room ?? "").slice(0, 80);
   const text = String(body.text ?? "").slice(0, 500);
   const payload = { ...body, output, volume, title, artist, url, room, text };
@@ -211,10 +214,12 @@ async function handleCommand(body, { dryRun, volumeOnly }) {
 
   if (!volumeOnly) {
     const hasAudio = /^https?:\/\//.test(url);
-    if (!hasAudio && text) {
-      lines.push(line("Play", true, "Nur Text. Sonos und Boxen brauchen eine Audiodatei."));
+    if (output === "receiver" && youtubeId && !hasAudio) {
+      lines.push(line("Play", true, dryRun ? "Angenommen, nicht gestartet." : "YouTube auf der Receiver-Seite."));
+    } else if (!hasAudio && text) {
+      lines.push(line("Play", true, "Nur Text. Sonos braucht eine Audiodatei, die Receiver-Seite hat keine Stimme."));
     } else if (!hasAudio) {
-      lines.push(line("Play", false, "Keine Audiodatei. YouTube bleibt im Browser."));
+      lines.push(line("Play", false, "Keine Audiodatei. YouTube geht an die Receiver-Seite, nicht an Sonos."));
     } else {
       lines.push(line("Play", true, dryRun ? "Angenommen, nicht gestartet." : "Angenommen."));
     }
@@ -251,7 +256,8 @@ async function handleCommand(body, { dryRun, volumeOnly }) {
     lines.push(line("Lautstärke", true, `${volume}`));
   }
 
-  if (!dryRun && !volumeOnly) {
+  const accepted = lines.find((item) => item.label === "Play")?.ok !== false;
+  if (!dryRun && !volumeOnly && accepted) {
     nowPlaying = {
       title: title || (text ? "Durchsage" : "Ohne Titel"),
       artist,
@@ -260,6 +266,8 @@ async function handleCommand(body, { dryRun, volumeOnly }) {
       room,
       volume,
       at: new Date().toISOString(),
+      url: /^https?:\/\//.test(url) ? url : "",
+      youtubeId,
     };
     if (output === "receiver") mock.volume = volume;
   }
@@ -351,16 +359,21 @@ function handleMockSoap(req, res, raw) {
   send(res, 200, xml, "text/xml; charset=utf-8");
 }
 
+function publicNow() {
+  return {
+    title: nowPlaying.title,
+    artist: nowPlaying.artist,
+    mode: nowPlaying.mode,
+    output: nowPlaying.output,
+    room: nowPlaying.room,
+    volume: nowPlaying.volume,
+    at: nowPlaying.at,
+    url: nowPlaying.url,
+    youtubeId: nowPlaying.youtubeId,
+  };
+}
+
 function page() {
-  const rows = journal
-    .slice(0, 12)
-    .map((entry) => {
-      const calls = (entry.sonos?.results ?? [])
-        .map((call) => `${call.action} ${call.ok ? "ok" : "fehlgeschlagen"}`)
-        .join(", ");
-      return `<li><strong>${escapeXml(entry.kind)}</strong> · ${escapeXml(entry.title || "—")} · ${escapeXml(entry.detail || "")}${calls ? `<div>${escapeXml(calls)}</div>` : ""}</li>`;
-    })
-    .join("");
   return `<!doctype html>
 <html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pulse Receiver</title>
@@ -370,16 +383,105 @@ function page() {
   h1{font-family:Georgia,serif;font-weight:500;font-size:2rem;margin:0 0 .5rem}
   p,li{color:#9aaba4}
   strong{color:#f3f6f4;font-weight:500}
+  button{height:2.75rem;padding:0 1rem;border:0;border-radius:8px;background:#2f9d86;color:#06211c;font:inherit;cursor:pointer}
+  #stage{margin:1rem 0;background:#161c1a;border:1px solid #2c3834;border-radius:12px;min-height:12rem;display:grid;place-items:center;overflow:hidden}
+  #stage iframe{width:100%;aspect-ratio:16/9;border:0}
+  audio{width:100%}
   ul{padding:0;list-style:none;display:grid;gap:.75rem}
   li{border-top:1px solid #2c3834;padding-top:.75rem}
 </style></head>
 <body><main>
   <h1>Receiver</h1>
-  <p>Web-Ausgang bereit. Sonos ohne Gerät geht an den Testlautsprecher.</p>
-  <p>Gerade: <strong>${escapeXml(nowPlaying.title)}</strong> · ${escapeXml(nowPlaying.output || "—")} · Lautstärke ${nowPlaying.volume}</p>
-  <p>Testlautsprecher: ${mock.playing ? escapeXml(mock.title || mock.uri || "läuft") : "still"} · ${mock.volume}</p>
-  <ul>${rows || "<li>Noch kein Befehl.</li>"}</ul>
-</main></body></html>`;
+  <p>Diese Seite ist der Lautsprecher. Sonos geht an das Gerät, YouTube und Audiodateien spielen hier.</p>
+  <p id="label">Wartet auf die Sendung.</p>
+  <div id="stage"><p id="idle">Noch still.</p></div>
+  <audio id="file" playsinline></audio>
+  <p><button id="arm" type="button">Ton an</button></p>
+  <ul id="journal"></ul>
+</main>
+<script>
+  const stage = document.getElementById("stage");
+  const label = document.getElementById("label");
+  const idle = document.getElementById("idle");
+  const file = document.getElementById("file");
+  const arm = document.getElementById("arm");
+  let armed = false;
+  let key = "";
+  let player = null;
+  arm.addEventListener("click", () => {
+    armed = true;
+    arm.hidden = true;
+    key = "";
+    void tick();
+  });
+  function elapsed(at) {
+    const t = Date.parse(at || "");
+    return Number.isFinite(t) ? Math.max(0, (Date.now() - t) / 1000) : 0;
+  }
+  function clearStage() {
+    if (player && player.destroy) player.destroy();
+    player = null;
+    stage.innerHTML = "";
+    stage.appendChild(idle);
+    idle.hidden = false;
+  }
+  function mountYoutube(id, start, volume) {
+    idle.hidden = true;
+    file.pause();
+    if (player && player.destroy) player.destroy();
+    const slot = document.createElement("div");
+    stage.innerHTML = "";
+    stage.appendChild(slot);
+    player = new YT.Player(slot, {
+      videoId: id,
+      playerVars: { autoplay: armed ? 1 : 0, start: Math.floor(start), rel: 0 },
+      events: { onReady(event) { event.target.setVolume(volume); if (armed) event.target.playVideo(); } }
+    });
+  }
+  async function tick() {
+    try {
+      const now = await fetch("/v1/now").then((res) => res.json());
+      label.textContent = (now.title || "Nichts") + (now.artist ? " · " + now.artist : "") + " · Lautstärke " + now.volume;
+      const vol = Math.max(0, Math.min(100, Number(now.volume) || 0));
+      file.volume = vol / 100;
+      if (now.output === "sonos") {
+        if (key !== "sonos") { key = "sonos"; clearStage(); idle.textContent = "Läuft auf Sonos."; }
+        return;
+      }
+      const next = (now.youtubeId || "") + "|" + (now.url || "") + "|" + (now.at || "");
+      const tube = /^[\\w-]{6,20}$/.test(now.youtubeId || "");
+      if (tube && !(window.YT && YT.Player)) return;
+      if (next === key) {
+        if (player && player.setVolume) player.setVolume(vol);
+        return;
+      }
+      key = next;
+      if (tube) {
+        mountYoutube(now.youtubeId, elapsed(now.at), vol);
+        return;
+      }
+      if (player) clearStage();
+      if (/^https?:\\/\\//.test(now.url || "")) {
+        idle.hidden = true;
+        file.src = now.url;
+        if (armed) {
+          try { await file.play(); file.currentTime = elapsed(now.at); } catch (e) { arm.hidden = false; }
+        }
+        return;
+      }
+      idle.hidden = false;
+      idle.textContent = now.title && now.title !== "Nichts" ? "Dieser Beitrag hat hier keinen Ton." : "Noch still.";
+      file.pause();
+    } catch (e) { label.textContent = "Receiver gerade nicht erreichbar."; }
+  }
+  window.onYouTubeIframeAPIReady = () => { key = ""; void tick(); };
+  const api = document.createElement("script");
+  api.src = "https://www.youtube.com/iframe_api";
+  document.head.appendChild(api);
+  setInterval(() => void tick(), 2000);
+  void tick();
+</script>
+</body></html>`;
 }
 
 async function route(req, res) {
@@ -399,6 +501,10 @@ async function route(req, res) {
   }
   if (req.method === "GET" && url.pathname === "/v1/health") {
     send(res, 200, { ok: true, service: "pulse-receiver", sonos: "mock" });
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/v1/now") {
+    send(res, 200, publicNow());
     return;
   }
   if (req.method === "GET" && url.pathname === "/v1/journal") {

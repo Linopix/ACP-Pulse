@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { WISH_GRACE_MS, parseIcs, wishFromText, wishesToPrune, type PruneCandidate } from "./logic.ts";
+import { WISH_GRACE_MS, parseIcs, spotifyPlaylistId, wishFromText, wishesToPrune, youtubePlaylistId, type PruneCandidate } from "./logic.ts";
 
 const now = 1_000_000;
 
@@ -68,4 +68,16 @@ END:VCALENDAR`);
   assert.equal(events.length, 1);
   assert.equal(events[0]?.title, "Townhall");
   assert.equal(events[0]?.startsAt, "2026-11-07T09:00:00.000Z");
+});
+
+test("Playlist-Links werden zur ID", () => {
+  assert.equal(spotifyPlaylistId("https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=abc"), "37i9dQZF1DXcBWIGoYBM5M");
+  assert.equal(spotifyPlaylistId("spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"), "37i9dQZF1DXcBWIGoYBM5M");
+  assert.equal(spotifyPlaylistId("https://open.spotify.com/track/3zOYmiNOuyDL0ClxJcEJ0T"), null);
+  assert.equal(
+    youtubePlaylistId("https://www.youtube.com/playlist?list=PLt7bG0K25iXj2h1eql20RZIPB_2CtK659"),
+    "PLt7bG0K25iXj2h1eql20RZIPB_2CtK659",
+  );
+  assert.equal(youtubePlaylistId("https://music.youtube.com/playlist?list=PLDIoUOhQQPlUDNpjEYTTE9tb-QvUHUSMt"), "PLDIoUOhQQPlUDNpjEYTTE9tb-QvUHUSMt");
+  assert.equal(youtubePlaylistId("https://youtu.be/dQw4w9WgXcQ"), null);
 });

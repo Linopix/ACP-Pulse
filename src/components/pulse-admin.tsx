@@ -1,7 +1,7 @@
 /** Regie. Jeder Abschnitt schreibt über eine eigene Serverfunktion, die Oberfläche hält kein Programm selbst. */
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import type { FilterMode } from "@/lib/pulse/logic";
+import { HOUSE_GENRES, type FilterMode } from "@/lib/pulse/logic";
 import {
   addPlaylistTrack,
   checkOutput,
@@ -13,6 +13,7 @@ import {
   generateModeration,
   getAdmin,
   airPiper,
+  importHouseLink,
   removePlaylistTrack,
   saveRelaySlot,
   saveRule,
@@ -479,6 +480,9 @@ function Playlists({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: Adm
   const [target, setTarget] = useState(data.playlists[0]?.id ?? 0);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<TrackInput[]>([]);
+  const [link, setLink] = useState("");
+  const [asFallback, setAsFallback] = useState(true);
+  const [pending, setPending] = useState("");
 
   useEffect(() => {
     if (!data.playlists.some((list) => list.id === target) && data.playlists[0]) {
@@ -486,8 +490,60 @@ function Playlists({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: Adm
     }
   }, [data.playlists, target]);
 
+  function run(id: string, task: Promise<AdminSnapshot>) {
+    setPending(id);
+    void task
+      .then((next) => {
+        onSaved(next);
+        if (id === "link") setLink("");
+      })
+      .catch((caught) => toast.error(errorText(caught)))
+      .finally(() => setPending(""));
+  }
+
   return (
     <div className="grid gap-4">
+      <Panel title="Standardmusik">
+        <p className="mb-4 text-sm text-muted">
+          Ohne Wünsche läuft die markierte Playlist. Chill, Pop Charts, Fokus und Jazz sind YouTube-Playlists. Ein
+          Spotify- oder YouTube-Link hängt dieselbe Liste hier an. YouTube spielt im Browser und auf der Receiver-Seite.
+        </p>
+        <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {HOUSE_GENRES.map((genre) => (
+            <Button
+              key={genre.id}
+              variant="line"
+              disabled={pending !== ""}
+              onClick={() => run(genre.id, importHouseLink({ data: { genre: genre.id } }))}
+            >
+              {pending === genre.id ? "Lädt…" : genre.name}
+            </Button>
+          ))}
+        </div>
+        <form
+          className="grid gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            run("link", importHouseLink({ data: { url: link, asFallback } }));
+          }}
+        >
+          <Field label="Playlist-Link" hint="open.spotify.com/playlist/… oder youtube.com/playlist?list=…">
+            <input className={fieldClass} value={link} onChange={(event) => setLink(event.target.value)} placeholder="Link einfügen" />
+          </Field>
+          <label className="flex items-center gap-3 text-sm">
+            <input
+              type="checkbox"
+              className="h-5 w-5 accent-signal"
+              checked={asFallback}
+              onChange={(event) => setAsFallback(event.target.checked)}
+            />
+            Als Standardmusik verwenden
+          </label>
+          <Button type="submit" disabled={link.trim().length < 12 || pending !== ""}>
+            {pending === "link" ? "Wird geholt…" : "Anbinden"}
+          </Button>
+        </form>
+      </Panel>
       <Panel title="Hausplaylist und weitere">
         <p className="mb-4 text-sm text-muted">Ohne Wünsche läuft die markierte Playlist.</p>
         <form
@@ -582,6 +638,7 @@ function PlaylistCard({ list, onSaved }: { list: PlaylistRecord; onSaved: (next:
           <li key={track.id} className="flex items-center justify-between gap-3 text-sm">
             <span className="min-w-0 truncate">
               {track.title} <span className="text-muted">· {track.artist}</span>
+              <span className="text-subtle">{track.source === "youtube" ? " · YouTube" : track.source === "spotify" ? " · Spotify" : ""}</span>
             </span>
             <button
               type="button"
@@ -734,7 +791,7 @@ function Stations({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: Admi
   return (
     <div className="grid gap-4">
       <Panel title="Echte Sender">
-        <p className="mb-4 text-sm text-muted">Öffentliche https-Streams. YouTube bleibt im Browser.</p>
+        <p className="mb-4 text-sm text-muted">Öffentliche https-Streams. YouTube spielt nicht auf Sonos, aber auf der Receiver-Seite.</p>
         <form
           className="grid gap-3"
           onSubmit={(event) => {

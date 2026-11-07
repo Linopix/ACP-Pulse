@@ -297,3 +297,47 @@ export function wishFromText(text: string): { volume: number | null; wishesEnabl
   if (/wünsche an|wuensche an|wunschbox/.test(hay)) wishesEnabled = true;
   return { volume, wishesEnabled, wishNote: text.trim().slice(0, 240) };
 }
+
+/** Hinterlegte Standardmusik. Die IDs sind öffentliche YouTube-Playlists. */
+export const HOUSE_GENRES: { id: string; name: string; playlistId: string }[] = [
+  { id: "chill", name: "Chill", playlistId: "PLt7bG0K25iXj2h1eql20RZIPB_2CtK659" },
+  { id: "pop", name: "Pop Charts", playlistId: "PLDIoUOhQQPlUDNpjEYTTE9tb-QvUHUSMt" },
+  { id: "focus", name: "Fokus", playlistId: "PLOzlQzU-yr65nTKt7tEbHBnnd0AiGJoqZ" },
+  { id: "jazz", name: "Jazz", playlistId: "PLiy0XOfUv4hFHmPs0a8RqkDzfT-2nw7WV" },
+];
+
+export function houseGenre(id: string) {
+  return HOUSE_GENRES.find((genre) => genre.id === id) ?? null;
+}
+
+/** Spotify-Playlist aus einem Link oder einer URI. Kein Track-Link. */
+export function spotifyPlaylistId(raw: string): string | null {
+  const text = raw.trim();
+  const uri = /^spotify:playlist:([A-Za-z0-9]{10,40})$/.exec(text);
+  if (uri?.[1]) return uri[1];
+  try {
+    const url = new URL(text);
+    if (!url.hostname.endsWith("spotify.com")) return null;
+    const parts = url.pathname.split("/").filter(Boolean);
+    const index = parts.indexOf("playlist");
+    const id = index >= 0 ? parts[index + 1] ?? "" : "";
+    return /^[A-Za-z0-9]{10,40}$/.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/** YouTube-Playlist aus einem Link oder einer nackten Listen-ID. */
+export function youtubePlaylistId(raw: string): string | null {
+  const text = raw.trim();
+  if (/^PL[\w-]{16,78}$/.test(text)) return text;
+  try {
+    const url = new URL(text);
+    const host = url.hostname.replace(/^www\./, "");
+    if (host !== "youtube.com" && host !== "music.youtube.com" && host !== "youtu.be") return null;
+    const list = url.searchParams.get("list") ?? "";
+    return /^[\w-]{13,80}$/.test(list) ? list : null;
+  } catch {
+    return null;
+  }
+}

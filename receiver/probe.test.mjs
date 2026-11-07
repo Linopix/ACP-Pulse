@@ -81,6 +81,37 @@ test("Probe trifft den Testlautsprecher und meldet ein fehlendes Gerät", async 
   assert.equal(played.ok, true);
   assert.equal(played.lines.find((line) => line.label === "Sonos").detail, "Nicht beteiligt.");
 
+  const tube = await fetch(`${base}/v1/play`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      output: "receiver",
+      mode: "fallback",
+      url: "",
+      youtubeId: "ko70cExuzZM",
+      title: "Ophelia",
+      artist: "Taylor Swift",
+      volume: 36,
+    }),
+  });
+  const tubed = await tube.json();
+  assert.equal(tubed.ok, true);
+  const now = await fetch(`${base}/v1/now`).then((res) => res.json());
+  assert.equal(now.youtubeId, "ko70cExuzZM");
+  assert.equal(now.output, "receiver");
+  assert.equal(now.volume, 36);
+
+  const sonosTube = await fetch(`${base}/v1/play`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ output: "sonos", url: "", youtubeId: "ko70cExuzZM", title: "Ophelia", sonosHost: "" }),
+  });
+  const sonosTubed = await sonosTube.json();
+  assert.equal(sonosTubed.ok, false);
+  const still = await fetch(`${base}/v1/now`).then((res) => res.json());
+  assert.equal(still.youtubeId, "ko70cExuzZM");
+  assert.equal(still.output, "receiver");
+
   const journal = await fetch(`${base}/v1/journal`).then((res) => res.json());
   const traced = journal.journal.find((entry) => entry.kind === "probe" && entry.sonos?.mode === "mock");
   assert.match(traced.sonos.results[0].body, /SetAVTransportURI/);
