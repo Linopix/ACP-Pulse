@@ -96,7 +96,7 @@ export function Panel({
   className?: string;
 }) {
   return (
-    <section className={cn("min-w-0 rounded-xl border border-line bg-surface p-4 sm:p-6", className)}>
+    <section className={cn("rise min-w-0 rounded-xl border border-line bg-surface p-4 sm:p-6", className)}>
       {title ? (
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="font-display text-2xl leading-none tracking-tight text-ink">{title}</h2>

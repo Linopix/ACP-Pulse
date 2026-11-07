@@ -843,7 +843,7 @@ async function buildNow(sql: Sql, pb: Row): Promise<PlaybackView> {
     mode: "idle",
     key: `idle:${startedAt ?? "0"}`,
     title: "Sendepause",
-    subtitle: "Gerade ist nichts Freigegebenes in der Queue oder Hausplaylist.",
+    subtitle: "Queue und Hausplaylist haben gerade nichts Spielbares.",
     artworkUrl: "",
     audioUrl: "",
     via: "Programm",

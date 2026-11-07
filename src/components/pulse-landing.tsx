@@ -14,7 +14,7 @@ const points = [
 export function StudioIntro({ children }: { children: React.ReactNode }) {
   return (
     <main className="mx-auto grid min-h-screen w-full max-w-6xl items-center gap-8 px-4 py-6 sm:px-6 lg:grid-cols-2 lg:gap-10 lg:py-12">
-      <div className="order-2 grid gap-6 lg:order-1 lg:gap-8">
+      <div className="rise order-2 grid gap-6 lg:order-1 lg:gap-8">
         <div className="flex items-center gap-3 text-signal">
           <Mark className="h-9 w-9" />
           <p className="text-sm font-medium tracking-wide text-muted">{brand.companyName} Mitarbeiter-Radio</p>

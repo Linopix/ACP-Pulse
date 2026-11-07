@@ -17,6 +17,7 @@ import {
 import type { QueueItem, StationSnapshot, TrackInput } from "@/lib/pulse/types";
 import { Button, Eq, Panel, TopBar, clockLabel, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
 import { GuideButton, GuidePanel } from "@/components/pulse-guide";
+import { cue } from "@/lib/pulse/cues";
 import { cn } from "@/lib/utils";
 
 const filters: Record<FilterMode, string> = {
@@ -150,6 +151,16 @@ function NowPlaying({
     : 0;
   const audible = snap.outputTarget === "browser" || snap.monitorExternal;
   const player = useAir(air, audible, snap.volume);
+  const heard = useRef("");
+
+  useEffect(() => {
+    if (!audible || player.muted) return;
+    if (heard.current === air.key) return;
+    const first = heard.current === "";
+    heard.current = air.key;
+    if (first) return;
+    void cue(air.mode === "announcement" ? "announce" : "air");
+  }, [air.key, air.mode, audible, player.muted]);
 
   return (
     <Panel>
@@ -161,7 +172,7 @@ function NowPlaying({
             <span>{air.via}</span>
             <span className="text-subtle">{filters[snap.explicitFilter]}</span>
           </div>
-          <div className="grid gap-1">
+          <div key={air.key} className="air-swap grid gap-1">
             <h1 className="truncate font-display text-4xl leading-none tracking-tight">{air.title}</h1>
             <p className="truncate text-muted">{air.subtitle}</p>
           </div>
@@ -169,11 +180,19 @@ function NowPlaying({
             <p className="text-sm text-ink">{air.announcementBody}</p>
           ) : null}
           <div className="h-1 overflow-hidden rounded-sm bg-surface-2">
-            <div className="h-full bg-signal" style={{ width: `${Math.round(progress * 100)}%` }} />
+            <div className="progress-fill h-full bg-signal" style={{ width: `${Math.round(progress * 100)}%` }} />
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm tabular-nums text-subtle">Lautstärke {snap.volume}</span>
-            <Button variant="line" onClick={() => player.setMuted((value) => !value)}>
+            <Button
+              variant="line"
+              onClick={() => {
+                player.setMuted((value) => {
+                  if (value) void cue("ident");
+                  return !value;
+                });
+              }}
+            >
               {player.muted ? "Ton an" : "Leise hier"}
             </Button>
             {player.blocked && audible ? (
@@ -338,7 +357,7 @@ function VoteButton({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "h-11 w-11 rounded-md text-sm font-medium disabled:opacity-30",
+        "vote h-11 w-11 rounded-md text-sm font-medium disabled:opacity-30",
         pressed ? "bg-signal text-signal-ink" : "bg-canvas text-muted",
       )}
     >
@@ -352,12 +371,14 @@ function Search({ snap, onAdded }: { snap: StationSnapshot; onAdded: (snap: Stat
   const [catalog, setCatalog] = useState<"preview" | "archive">(snap.musicSource === "preview" ? "preview" : "archive");
   const [hits, setHits] = useState<TrackInput[]>([]);
   const [pending, setPending] = useState(false);
+  const [looked, setLooked] = useState(false);
 
   async function onSearch(event: React.FormEvent) {
     event.preventDefault();
     setPending(true);
     try {
       setHits(await searchMusic({ data: { query, catalog } }));
+      setLooked(true);
     } catch (error) {
       toast.error(errorText(error));
     } finally {
@@ -417,13 +438,18 @@ function Search({ snap, onAdded }: { snap: StationSnapshot; onAdded: (snap: Stat
             <Button
               variant="line"
               disabled={closed}
-              onClick={() => void run(() => addWish({ data: hit }), onAdded, "In der Queue.")}
+              onClick={() =>
+                void run(() => addWish({ data: hit }), onAdded, "In der Queue.").then((ok) => {
+                  if (ok) void cue("wish");
+                })
+              }
             >
               Dazu
             </Button>
           </li>
         ))}
       </ul>
+      {looked && hits.length === 0 ? <p className="mt-3 text-sm text-muted">Nichts gefunden. Anderer Suchbegriff.</p> : null}
     </Panel>
   );
 }
@@ -481,6 +507,7 @@ function useAir(
   const [ytArmed, setYtArmed] = useState(false);
 
   const start = useCallback(async () => {
+    void cue("ident");
     const audio = audioRef.current;
     setBlocked(false);
     setYtArmed(true);
@@ -588,18 +615,21 @@ function speak(text: string) {
 }
 
 async function vote(item: QueueItem, value: -1 | 0 | 1, onChange: (snap: StationSnapshot) => void) {
-  await run(() => castVote({ data: { id: item.id, value } }), onChange);
+  const ok = await run(() => castVote({ data: { id: item.id, value } }), onChange);
+  if (ok && value !== 0) void cue("tick");
 }
 
 async function run(
   action: () => Promise<StationSnapshot>,
   onChange: (snap: StationSnapshot) => void,
   ok?: string,
-) {
+): Promise<boolean> {
   try {
     onChange(await action());
     if (ok) toast.success(ok);
+    return true;
   } catch (error) {
     toast.error(errorText(error));
+    return false;
   }
 }

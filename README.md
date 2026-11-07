@@ -172,6 +172,7 @@ npm run typecheck
 | `src/brand.ts` | Name, Farben, Schriften, Radien |
 | `src/lib/pulse/logic.ts` | Stimmen, Filter, Aufräumen, YouTube-Link, Rollen |
 | `src/lib/pulse/api.ts` | Serverfunktionen, Playback, Dispatch |
+| `src/lib/pulse/cues.ts` | Kennungen nur im Browser, nicht auf Sendung |
 | `src/lib/pulse/types.ts` | Snapshots, die die Oberfläche bekommt |
 | `src/components/pulse-station.tsx` | Sendung |
 | `src/components/pulse-dj.tsx` | Pult |
@@ -179,3 +180,23 @@ npm run typecheck
 | `src/components/pulse-guide.tsx` | Führung |
 | `src/components/pulse-ui.tsx` | Leiste, Flächen, Knöpfe |
 | `receiver/server.mjs` | Test-Receiver und Sonos-SOAP |
+
+## KI, noch nicht angeschlossen
+
+OpenWebUI bleibt intern. Die Sendung ruft es nicht auf. Sinnvoll wäre es nur als Redaktion, nie als eigene Stimme auf Sendung:
+
+- Durchsage-Skript aus Text, den die Regie selbst eingibt: Firmennotizen oder ein eingefügter Nachrichtenausschnitt. Keine eigenen Schlagzeilen.
+- Kurzer Hinweis am Pult, was als Nächstes im Zeitplan steht. Nur für die Person am Pult.
+- Erklärung, warum ein Titel am Filter hängen bleibt.
+
+Nicht sinnvoll: Titel selbst aussuchen, ungeprüft sprechen, Personen nennen, die nicht in den Notizen stehen.
+
+Ein realistischer Moderator braucht später vier Dinge, die heute fehlen:
+
+1. OpenWebUI als OpenAI-kompatible Chat-Schnittstelle: Basis-URL, API-Schlüssel, Modellname. Der Server der Sendung muss diese Adresse erreichen.
+2. Eine getrennte Sprachausgabe, zum Beispiel Piper auf dem Pi. OpenWebUI liefert Text, keinen sendefähigen Ton.
+3. Die erzeugte Audiodatei läuft über denselben Weg wie eine Mikrofonaufnahme, damit Browser, Sonos und Receiver dasselbe spielen.
+4. Freigabe: Entwurf lesen, dann auf Sendung, oder nur in den schon vorhandenen Slots und nur aus freigegebenem Text. Jedes Skript bleibt nachlesbar. Ohne Schlüssel oder ohne Modell bleibt es bei Durchsagen von Hand.
+
+`XAI_API_KEY` ist der bisherige Platzhalter für «Skript erzeugen» und kein Ersatz für diese Kette.
+

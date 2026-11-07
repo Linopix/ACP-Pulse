@@ -94,7 +94,7 @@ export function AdminDesk() {
                   type="button"
                   onClick={() => setSection(item.id)}
                   className={cn(
-                    "h-11 shrink-0 rounded-md px-4 text-sm",
+                    "nav-pill h-11 shrink-0 rounded-md px-4 text-sm",
                     section === item.id ? "bg-signal text-signal-ink" : "bg-surface text-muted",
                   )}
                 >
@@ -102,15 +102,17 @@ export function AdminDesk() {
                 </button>
               ))}
             </div>
-            {section === "ausgabe" ? (
-              <OutputForm initial={data.settings} suggested={data.suggestedReceiver} onSaved={setData} />
-            ) : null}
-            {section === "programm" ? <ProgramForm initial={data.settings} onSaved={setData} /> : null}
-            {section === "kalender" ? <Calendar data={data} onSaved={setData} /> : null}
-            {section === "sender" ? <Stations data={data} onSaved={setData} /> : null}
-            {section === "playlists" ? <Playlists data={data} onSaved={setData} /> : null}
-            {section === "moderation" ? <Moderation data={data} onSaved={setData} /> : null}
-            {section === "team" ? <Team data={data} onSaved={setData} /> : null}
+            <div key={section} className="rise">
+              {section === "ausgabe" ? (
+                <OutputForm initial={data.settings} suggested={data.suggestedReceiver} onSaved={setData} />
+              ) : null}
+              {section === "programm" ? <ProgramForm initial={data.settings} onSaved={setData} /> : null}
+              {section === "kalender" ? <Calendar data={data} onSaved={setData} /> : null}
+              {section === "sender" ? <Stations data={data} onSaved={setData} /> : null}
+              {section === "playlists" ? <Playlists data={data} onSaved={setData} /> : null}
+              {section === "moderation" ? <Moderation data={data} onSaved={setData} /> : null}
+              {section === "team" ? <Team data={data} onSaved={setData} /> : null}
+            </div>
           </>
         ) : null}
       </main>

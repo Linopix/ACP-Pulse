@@ -37,7 +37,7 @@ function stepsFor(role: DeskRole) {
     },
     {
       title: "Hören",
-      body: "Blockt der Browser den Ton, «Sendung hören» tippen. «Leise hier» gilt nur für dieses Gerät.",
+      body: "Blockt der Browser den Ton, «Sendung hören» tippen. Dabei kommt eine kurze Kennung. «Leise hier» gilt nur für dieses Gerät, auch für die Kennungen.",
     },
     {
       title: "Wünschen",
