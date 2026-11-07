@@ -1,3 +1,4 @@
+/** Regie. Die Rolle prüft die Serverfunktion, die Seite selbst nur die Anmeldung. */
 import { createFileRoute } from "@tanstack/react-router";
 import { RedirectToSignIn } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";

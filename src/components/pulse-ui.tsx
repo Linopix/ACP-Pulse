@@ -1,3 +1,4 @@
+/** Gemeinsame Flächen. Farben und Schriften kommen aus brand.ts, nicht von hier. */
 import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { brand } from "@/brand";

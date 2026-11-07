@@ -1,3 +1,4 @@
+/** Kurze Führung. Einmal pro Browser, danach nur noch über den Knopf. Schritte hängen an der Rolle. */
 import { useEffect } from "react";
 import { create } from "zustand";
 import type { DeskRole } from "@/lib/pulse/logic";

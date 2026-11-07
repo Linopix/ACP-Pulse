@@ -1,3 +1,4 @@
+/** Start: ohne Konto die Anmeldung, sonst die Sendung. */
 import { createFileRoute } from "@tanstack/react-router";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { AuthCard, AuthSkeleton, StudioIntro, useHydrated } from "@/components/pulse-landing";

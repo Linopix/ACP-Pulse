@@ -1,3 +1,4 @@
+/** Pult. DJ und Regie; Hörer bekommen von der Serverfunktion eine Absage. */
 import { createFileRoute } from "@tanstack/react-router";
 import { RedirectToSignIn } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";

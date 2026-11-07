@@ -1,3 +1,4 @@
+/** Sendung: jetzt, Queue, Suche, Stimmen. Daten kommen aus getStation. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";

@@ -1,6 +1,7 @@
 /**
  * Reine Regeln für Queue, Voting und Programm.
  * Kein Datenbankzugriff — dieselbe Logik für Server und Oberfläche.
+ * Was die Funktionen entscheiden, steht in der README unter Stimmen, Filter und Aufräumen.
  */
 
 export const MAX_OPEN_WISHES = 3;
@@ -28,6 +29,7 @@ export const DEFAULT_WISH_PRUNE_AT = 8;
 /** Frische Wünsche bleiben kurz liegen, damit überhaupt eine Stimme ankommen kann. */
 export const WISH_GRACE_MS = 90_000;
 
+/** Komma-, Semikolon- oder zeilengetrennte Sperrwörter. Leer, kürzer als 2, länger als 40 und Duplikate fallen weg. */
 export function parseWords(raw: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -40,6 +42,11 @@ export function parseWords(raw: string): string[] {
   return out;
 }
 
+/**
+ * Stimmen pro Person, abhängig von der Queue.
+ * Hoch: höchstens ein Drittel, mindestens eine, nie die ganze Queue.
+ * Bei einem Titel gibt es kein Hoch, nur ein Runter.
+ */
 export function voteBudget(queueLength: number): { up: number; down: number } {
   if (queueLength <= 0) return { up: 0, down: 0 };
   if (queueLength === 1) return { up: 0, down: 1 };
@@ -49,6 +56,10 @@ export function voteBudget(queueLength: number): { up: number; down: number } {
   return { up, down };
 }
 
+/**
+ * `allow` lässt alles durch. `clean` sperrt nur das Explicit-Flag.
+ * `strict` sperrt zusätzlich Titel oder Artist, die ein Sperrwort enthalten.
+ */
 export function isBlocked(
   track: { title: string; artist: string; explicit: boolean },
   filter: FilterMode,
@@ -62,21 +73,25 @@ export function isBlocked(
   return words.some((word) => word.length > 0 && hay.includes(word));
 }
 
+/** Geschätzte Sprechdauer einer Text-Durchsage, zwischen 7 und 50 Sekunden. */
 export function speechDurationMs(text: string): number {
   const words = text.trim().split(/\s+/).filter(Boolean).length;
   return Math.min(50_000, Math.max(7_000, 2_500 + words * 420));
 }
 
+/** 0–100. Ungültige Werte werden 40. */
 export function clampVolume(value: number): number {
   if (!Number.isFinite(value)) return 40;
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+/** Runter-Stimmen, ab denen ein Titel fliegt: 2–20, sonst 3. */
 export function clampKick(value: number): number {
   if (!Number.isFinite(value)) return 3;
   return Math.max(2, Math.min(20, Math.round(value)));
 }
 
+/** Queue-Grenze fürs Aufräumen: 4–40, sonst 8. */
 export function clampPruneAt(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_WISH_PRUNE_AT;
   return Math.max(4, Math.min(40, Math.round(value)));
@@ -103,6 +118,7 @@ export function nextSlot(slots: string, from = new Date()): Date | null {
   return candidates[0] ?? null;
 }
 
+/** Anzeigename des Ausgangs in der Sendung. */
 export function outputLabel(target: OutputTarget, room: string): string {
   if (target === "sonos") return room.trim() ? `Sonos · ${room.trim()}` : "Sonos";
   if (target === "receiver") return "Receiver";
@@ -111,6 +127,7 @@ export function outputLabel(target: OutputTarget, room: string): string {
 
 export type DeskRole = "admin" | "dj" | "listener";
 
+/** Pult: DJ und Regie. Hörer nicht. */
 export function isDesk(role: string): boolean {
   return role === "admin" || role === "dj";
 }

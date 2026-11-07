@@ -1,3 +1,4 @@
+/** Pult: Mikrofon, gespeicherte Aufnahmen, Sender sofort, fremde Audiodatei. */
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";

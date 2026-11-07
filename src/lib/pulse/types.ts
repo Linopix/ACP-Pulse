@@ -1,3 +1,8 @@
+/**
+ * Antworten, die die Oberfläche von den Serverfunktionen bekommt.
+ * `StationSnapshot` ist die Sendung, `DeskSnapshot` das Pult, `AdminSnapshot` die Regie.
+ * Regeln, die diese Werte erzeugen, stehen in logic.ts und api.ts — nicht hier.
+ */
 import type { DeskRole, FilterMode, OutputTarget, WishPruneMode } from "@/lib/pulse/logic";
 
 export type TrackSource = "preview" | "spotify" | "archive" | "youtube" | "link";

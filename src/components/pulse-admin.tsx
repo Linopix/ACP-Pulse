@@ -1,3 +1,4 @@
+/** Regie. Jeder Abschnitt schreibt über eine eigene Serverfunktion, die Oberfläche hält kein Programm selbst. */
 import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";

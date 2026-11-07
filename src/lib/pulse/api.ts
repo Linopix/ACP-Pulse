@@ -1,3 +1,14 @@
+/**
+ * Serverfunktionen der Sendung.
+ *
+ * Eine Zeile in `playback` ist die gemeinsame Uhr. `advancePlayback` wählt den
+ * nächsten Beitrag: Durchsage, Relais, Wunsch nach Score, sonst Hausplaylist.
+ * `tryDispatch` schickt denselben Beitrag an Sonos oder den Receiver, wenn das
+ * Ziel nicht der Browser ist. YouTube bleibt im Browser.
+ *
+ * Schreibende Wege laufen durch `withRadioLock`. Die reinen Entscheidungen
+ * (Stimmen, Filter, Aufräumen) liegen in logic.ts.
+ */
 import { createServerFn } from "@tanstack/react-start";
 import { getSql, type Sql } from "@/lib/db";
 import { authMiddleware } from "@/lib/auth/middleware";
@@ -529,6 +540,7 @@ async function startRelay(sql: Sql, relay: RelayHit) {
   `;
 }
 
+/** Nächster Beitrag. `force` beendet den aktuellen sofort, `interrupt` schiebt ihn zurück in die Queue. */
 async function advancePlayback(sql: Sql, opts?: { force?: boolean; interrupt?: boolean }) {
   await pruneWeakWishes(sql);
   let pb = await readPlayback(sql);
@@ -685,6 +697,7 @@ async function advancePlayback(sql: Sql, opts?: { force?: boolean; interrupt?: b
   await tryDispatch(sql);
 }
 
+/** Ein Play pro Beitrag. Fehlschlag lässt die Browser-Sendung weiterlaufen. */
 async function tryDispatch(sql: Sql) {
   const settings = await loadEffective(sql);
   if (settings.outputTarget === "browser" || !settings.receiverUrl) return;
@@ -935,6 +948,7 @@ async function sessionSnapshot(sql: Sql, userId: string) {
   return buildSnapshot(sql, userId, member.name, identity.email, member.role);
 }
 
+/** Stimmen neu zählen. Genug Runter und mehr Runter als Hoch setzt den Titel auf `kicked`. */
 async function refreshScores(sql: Sql, itemId: number, kickAt: number) {
   await sql`
     update queue_items q set
@@ -957,6 +971,7 @@ async function refreshScores(sql: Sql, itemId: number, kickAt: number) {
   }
 }
 
+/** Wendet wishesToPrune an. Manuell ignoriert Grenze und Schonfrist. Ergebnisstatus: `pruned`. */
 async function pruneWeakWishes(sql: Sql, opts?: { manual?: boolean }): Promise<number> {
   const settings = await loadBaseSettings(sql);
   const rows = await sql<Row>`

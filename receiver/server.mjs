@@ -1,7 +1,19 @@
 /**
  * Test-Receiver für ACP Pulse.
- * Nimmt Play und Lautstärke an, spricht Sonos per SOAP an
- * und hält ohne Gerät einen Testlautsprecher im Prozess.
+ *
+ * Nimmt Play und Lautstärke an, spricht Sonos per SOAP an und hält ohne Gerät
+ * einen Testlautsprecher im Prozess. Die Umschläge liegen im Journal.
+ *
+ *   GET  /                Statusseite
+ *   GET  /v1/health       Lebenszeichen
+ *   GET  /v1/journal      letzte Befehle
+ *   GET  /sonos/state     Zustand des Testlautsprechers
+ *   POST /v1/probe        prüfen, nichts starten
+ *   POST /v1/play         annehmen, bei Sonos abschicken
+ *   POST /v1/volume       nur Lautstärke
+ *   POST /MediaRenderer/… SOAP-Gegenstelle des Testlautsprechers
+ *
+ * Sonos-Ziel ist Host oder Host:Port. Leer oder "mock" bleibt im Prozess, Port sonst 1400.
  */
 import http from "node:http";
 import { fileURLToPath } from "node:url";
@@ -38,6 +50,7 @@ function escapeXml(value) {
     .replace(/'/g, "&" + "apos;");
 }
 
+/** SOAP-Umschlag. Feldwerte werden escapet, CurrentURIMetaData damit ein zweites Mal. */
 export function soapEnvelope(action, service, fields) {
   const inner = Object.entries(fields)
     .map(([key, value]) => `<${key}>${escapeXml(value)}</${key}>`)
@@ -53,6 +66,7 @@ export function soapEnvelope(action, service, fields) {
 const AV = "urn:schemas-upnp-org:service:AVTransport:1";
 const RC = "urn:schemas-upnp-org:service:RenderingControl:1";
 
+/** SetAVTransportURI, Play, SetVolume. Dieselben drei Aufrufe gehen an ein echtes Gerät. */
 export function sonosCalls({ url, title, artist, volume, room }) {
   const meta = `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/"><item><dc:title>${escapeXml(title)}</dc:title><dc:creator>${escapeXml(artist)}</dc:creator></item></DIDL-Lite>`;
   return [
