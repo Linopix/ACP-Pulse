@@ -1,0 +1,78 @@
+# Test-Schnitt, dieselbe Form wie Docker Compose.
+# Der Receiver muss das Sonos-Gerät im Büro-Netz erreichen.
+# In einem entfernten Cluster bleibt er ein Testlautsprecher, kein Raum.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pulse-receiver
+  labels:
+    app: pulse-receiver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pulse-receiver
+  template:
+    metadata:
+      labels:
+        app: pulse-receiver
+    spec:
+      containers:
+        - name: receiver
+          image: pulse-receiver:test
+          ports:
+            - containerPort: 8090
+          env:
+            - name: PORT
+              value: "8090"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pulse-receiver
+spec:
+  selector:
+    app: pulse-receiver
+  ports:
+    - port: 8090
+      targetPort: 8090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pulse
+  labels:
+    app: pulse
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pulse
+  template:
+    metadata:
+      labels:
+        app: pulse
+    spec:
+      containers:
+        - name: pulse
+          image: pulse:test
+          ports:
+            - containerPort: 8080
+          env:
+            - name: HOST
+              value: 0.0.0.0
+            - name: PORT
+              value: "8080"
+            - name: PULSE_RECEIVER_URL
+              value: http://pulse-receiver:8090
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pulse
+spec:
+  selector:
+    app: pulse
+  ports:
+    - port: 8080
+      targetPort: 8080

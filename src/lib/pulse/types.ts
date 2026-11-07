@@ -1,4 +1,4 @@
-import type { DeskRole, FilterMode, OutputTarget } from "@/lib/pulse/logic";
+import type { DeskRole, FilterMode, OutputTarget, WishPruneMode } from "@/lib/pulse/logic";
 
 export type TrackSource = "preview" | "spotify" | "archive" | "youtube" | "link";
 
@@ -62,6 +62,8 @@ export type StationSnapshot = {
   receiverConfigured: boolean;
   musicSource: "preview" | "spotify" | "archive";
   downvoteKick: number;
+  wishPrune: WishPruneMode;
+  wishPruneAt: number;
   monitorExternal: boolean;
   activeRule: ActiveRule | null;
   relay: { title: string; stationName: string; endsAt: string } | null;
@@ -128,6 +130,8 @@ export type SettingsRecord = {
   sonosHost: string;
   receiverUrl: string;
   downvoteKick: number;
+  wishPrune: WishPruneMode;
+  wishPruneAt: number;
   extraBlocklist: string;
   musicSource: "preview" | "spotify" | "archive";
   spotifyClientId: string;
@@ -180,6 +184,7 @@ export type AdminSnapshot = {
   stations: RelayStation[];
   slots: RelaySlot[];
   nextSlot: string | null;
+  suggestedReceiver: string;
 };
 
 export type RuleInput = {
@@ -191,4 +196,17 @@ export type RuleInput = {
   wishesEnabled: boolean | null;
   explicitFilter: FilterMode | null;
   note: string;
+};
+
+export type ProbeLine = {
+  label: string;
+  ok: boolean;
+  detail: string;
+};
+
+export type OutputProbe = {
+  ok: boolean;
+  detail: string;
+  lines: ProbeLine[];
+  usingSaved: boolean;
 };

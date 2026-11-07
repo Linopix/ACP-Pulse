@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { brand } from "@/brand";
 import { UserButton } from "@/lib/auth/gates";
 import type { FilterMode } from "@/lib/pulse/logic";
 import {
@@ -22,9 +21,11 @@ import {
   searchMusic,
   setFallback,
   setMemberRole,
+  pruneWishes,
 } from "@/lib/pulse/api";
-import type { AdminSnapshot, PlaylistRecord, SettingsRecord, TrackInput } from "@/lib/pulse/types";
+import type { AdminSnapshot, OutputProbe, PlaylistRecord, SettingsRecord, TrackInput } from "@/lib/pulse/types";
 import { Button, Field, Panel, TopBar, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
+import { GuideButton, GuidePanel } from "@/components/pulse-guide";
 import { cn } from "@/lib/utils";
 
 type Section = "ausgabe" | "programm" | "kalender" | "sender" | "playlists" | "moderation" | "team";
@@ -66,14 +67,14 @@ export function AdminDesk() {
         <Link to="/dj" className="inline-flex h-11 items-center rounded-md px-3 text-sm text-ink">
           Pult
         </Link>
+        <GuideButton />
         <UserButton />
       </TopBar>
       <main className="grid w-full min-w-0 grid-cols-1 gap-4 px-4 pb-10 sm:px-6">
         <div className="grid gap-2">
           <h1 className="font-display text-4xl tracking-tight">Regie</h1>
           <p className="max-w-2xl text-sm text-muted">
-            Lautstärke, Filter und Wünsche gelten für alle. Ein Kalendereintrag überschreibt sie nur für sein Fenster.
-            Farben und Name stehen in der Marken-Datei und lassen sich später auf die Firmen-CI ziehen.
+            Lautstärke, Filter und Wünsche gelten für alle. Ein Zeitfenster überschreibt sie nur solange es läuft.
           </p>
         </div>
         {!data && !error ? <p className="text-muted">Regie wird geladen.</p> : null}
@@ -84,6 +85,7 @@ export function AdminDesk() {
         ) : null}
         {data ? (
           <>
+            <GuidePanel role="admin" />
             <div className="flex gap-2 overflow-x-auto">
               {sections.map((item) => (
                 <button
@@ -99,7 +101,9 @@ export function AdminDesk() {
                 </button>
               ))}
             </div>
-            {section === "ausgabe" ? <OutputForm initial={data.settings} onSaved={setData} /> : null}
+            {section === "ausgabe" ? (
+              <OutputForm initial={data.settings} suggested={data.suggestedReceiver} onSaved={setData} />
+            ) : null}
             {section === "programm" ? <ProgramForm initial={data.settings} onSaved={setData} /> : null}
             {section === "kalender" ? <Calendar data={data} onSaved={setData} /> : null}
             {section === "sender" ? <Stations data={data} onSaved={setData} /> : null}
@@ -113,9 +117,17 @@ export function AdminDesk() {
   );
 }
 
-function OutputForm({ initial, onSaved }: { initial: SettingsRecord; onSaved: (data: AdminSnapshot) => void }) {
+function OutputForm({
+  initial,
+  suggested,
+  onSaved,
+}: {
+  initial: SettingsRecord;
+  suggested: string;
+  onSaved: (data: AdminSnapshot) => void;
+}) {
   const [form, setForm] = useState(initial);
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState<OutputProbe | null>(null);
   const [pending, setPending] = useState(false);
   const external = form.outputTarget !== "browser";
 
@@ -155,10 +167,7 @@ function OutputForm({ initial, onSaved }: { initial: SettingsRecord; onSaved: (d
             </button>
           ))}
         </div>
-        <p className="text-sm text-muted">
-          Browser ist die Sendung an diesem Gerät. Sonos und echte Boxen laufen über denselben kleinen Dienst im
-          Büro-Netz. Der spricht entweder den Sonos-Raum oder den Ausgang am Mini-Server an.
-        </p>
+        <p className="text-sm text-muted">Browser spielt hier. Sonos und Boxen über den Receiver.</p>
         {external ? (
           <div className="grid gap-3">
             <Field label="Receiver-Adresse" hint="Zum Beispiel http://192.168.1.40:8090">
@@ -168,6 +177,11 @@ function OutputForm({ initial, onSaved }: { initial: SettingsRecord; onSaved: (d
                 onChange={(event) => setForm({ ...form, receiverUrl: event.target.value })}
               />
             </Field>
+            {suggested && !form.receiverUrl ? (
+              <Button variant="line" onClick={() => setForm({ ...form, receiverUrl: suggested })}>
+                Test-Receiver übernehmen
+              </Button>
+            ) : null}
             {form.outputTarget === "sonos" ? (
               <>
                 <Field label="Sonos-Raum">
@@ -177,7 +191,7 @@ function OutputForm({ initial, onSaved }: { initial: SettingsRecord; onSaved: (d
                     onChange={(event) => setForm({ ...form, sonosRoom: event.target.value })}
                   />
                 </Field>
-                <Field label="Sonos-Host, optional" hint="Nur als Notiz für die Bridge. Die Cloud erreicht Sonos nicht direkt.">
+                <Field label="Sonos-Gerät" hint="Leer prüft den Testlautsprecher. Sonst die IP des Sonos.">
                   <input
                     className={fieldClass}
                     value={form.sonosHost}
@@ -195,11 +209,6 @@ function OutputForm({ initial, onSaved }: { initial: SettingsRecord; onSaved: (d
               />
               Zusätzlich in diesem Browser mithören
             </label>
-            <pre className="overflow-x-auto rounded-md bg-canvas p-3 text-xs leading-5 text-muted">
-{`GET  /v1/health
-POST /v1/play    { mode, url, title, artist, text, volume, room, output }
-POST /v1/volume  { volume, room, output }`}
-            </pre>
           </div>
         ) : null}
         <Field label={`Lautstärke ${form.volume}`}>
@@ -219,14 +228,31 @@ POST /v1/volume  { volume, room, output }`}
             variant="line"
             onClick={() => {
               void checkOutput()
-                .then((result) => setStatus(result.detail))
-                .catch((caught) => setStatus(errorText(caught)));
+                .then((result) => setStatus(result))
+                .catch((caught) =>
+                  setStatus({ ok: false, usingSaved: true, detail: errorText(caught), lines: [] }),
+                );
             }}
           >
             Verbindung prüfen
           </Button>
         </div>
-        {status ? <p className="text-sm text-muted">{status}</p> : null}
+        {status ? (
+          <div className="grid gap-2">
+            <p className="text-sm text-ink">{status.detail}</p>
+            <ul className="grid gap-1">
+              {status.lines.map((line) => (
+                <li key={line.label} className="text-sm text-muted">
+                  <span className={line.ok ? "text-ok" : "text-danger"}>{line.ok ? "Ok" : "Nicht ok"}</span>
+                  {" · "}
+                  {line.label}
+                  {" · "}
+                  {line.detail}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </div>
     </Panel>
   );
@@ -281,7 +307,7 @@ function ProgramForm({ initial, onSaved }: { initial: SettingsRecord; onSaved: (
             onChange={(event) => setForm({ ...form, extraBlocklist: event.target.value })}
           />
         </Field>
-        <Field label="Downvotes bis ein Titel fliegt" hint="Mindestens 2, jede Person stimmt pro Titel nur einmal.">
+        <Field label="Downvotes bis ein Titel fliegt" hint="Mindestens 2. Jede Person stimmt pro Titel nur einmal.">
           <input
             className={fieldClass}
             type="number"
@@ -291,6 +317,31 @@ function ProgramForm({ initial, onSaved }: { initial: SettingsRecord; onSaved: (
             onChange={(event) => setForm({ ...form, downvoteKick: Number(event.target.value) })}
           />
         </Field>
+        <Field label="Volle Queue">
+          <select
+            className={fieldClass}
+            value={form.wishPrune}
+            onChange={(event) => setForm({ ...form, wishPrune: event.target.value === "off" ? "off" : "auto" })}
+          >
+            <option value="auto">Schwache Wünsche automatisch raus</option>
+            <option value="off">Nichts automatisch entfernen</option>
+          </select>
+        </Field>
+        {form.wishPrune === "auto" ? (
+          <Field
+            label="Ab so vielen Wünschen"
+            hint="Ohne Upvote oder mit mehr Runter als Hoch. Ganz neue bleiben kurz liegen."
+          >
+            <input
+              className={fieldClass}
+              type="number"
+              min={4}
+              max={40}
+              value={form.wishPruneAt}
+              onChange={(event) => setForm({ ...form, wishPruneAt: Number(event.target.value) })}
+            />
+          </Field>
+        ) : null}
         <Field label="Musikquelle">
           <select
             className={fieldClass}
@@ -309,7 +360,7 @@ function ProgramForm({ initial, onSaved }: { initial: SettingsRecord; onSaved: (
           </select>
         </Field>
         {form.musicSource === "spotify" ? (
-          <Field label="Spotify Client-ID" hint="Ohne abgeschlossene Spotify-Anmeldung bleibt die Suche bewusst aus.">
+          <Field label="Spotify Client-ID" hint="Ohne Verbindung bleibt die Suche aus.">
             <input
               className={fieldClass}
               value={form.spotifyClientId}
@@ -317,9 +368,25 @@ function ProgramForm({ initial, onSaved }: { initial: SettingsRecord; onSaved: (
             />
           </Field>
         ) : null}
-        <Button type="submit" disabled={pending}>
-          Speichern
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" disabled={pending}>
+            Speichern
+          </Button>
+          <Button
+            type="button"
+            variant="line"
+            onClick={() => {
+              void pruneWishes()
+                .then((next) => {
+                  onSaved(next);
+                  toast.success(next.removed > 0 ? `${next.removed} Wünsche raus.` : "Nichts zum Aufräumen.");
+                })
+                .catch((caught) => toast.error(errorText(caught)));
+            }}
+          >
+            Jetzt aufräumen
+          </Button>
+        </div>
       </form>
     </Panel>
   );
@@ -452,9 +519,7 @@ function Playlists({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: Adm
   return (
     <div className="grid gap-4">
       <Panel title="Hausplaylist und weitere">
-        <p className="mb-4 text-sm text-muted">
-          Wenn niemand wünscht, läuft die markierte Playlist. {brand.productShort} sucht Titel im Vorschau-Katalog.
-        </p>
+        <p className="mb-4 text-sm text-muted">Ohne Wünsche läuft die markierte Playlist.</p>
         <form
           className="mb-4 flex gap-2"
           onSubmit={(event) => {
@@ -579,10 +644,7 @@ function Moderation({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: Ad
     <div className="grid gap-4">
       <Panel title="KI-Moderator">
         <div className="grid gap-4">
-          <p className="text-sm text-muted">
-            Zu den Slots spricht eine vorbereitete Moderation. Erzeugen bleibt ein Knopfdruck, damit nichts im
-            Hintergrund Kosten verursacht. Ohne KI-Zugang bleiben die Durchsagen von Hand.
-          </p>
+          <p className="text-sm text-muted">Zu den Uhrzeiten eine kurze Ansage. Erzeugen bleibt ein Knopfdruck.</p>
           <label className="flex items-center gap-3 text-sm">
             <input
               type="checkbox"
@@ -688,10 +750,7 @@ function Stations({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: Admi
   return (
     <div className="grid gap-4">
       <Panel title="Echte Sender">
-        <p className="mb-4 text-sm text-muted">
-          Öffentliche https-Streams, zum Beispiel die Nachrichtenschleifen der Öffentlich-Rechtlichen. Der Browser folgt
-          der Umleitung des Senders. YouTube bleibt eine Einbettung und geht nicht an Sonos.
-        </p>
+        <p className="mb-4 text-sm text-muted">Öffentliche https-Streams. YouTube bleibt im Browser.</p>
         <form
           className="grid gap-3"
           onSubmit={(event) => {

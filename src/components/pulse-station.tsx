@@ -15,6 +15,7 @@ import {
 } from "@/lib/pulse/api";
 import type { QueueItem, StationSnapshot, TrackInput } from "@/lib/pulse/types";
 import { Button, Eq, Panel, TopBar, clockLabel, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
+import { GuideButton, GuidePanel } from "@/components/pulse-guide";
 import { cn } from "@/lib/utils";
 
 const filters: Record<FilterMode, string> = {
@@ -58,6 +59,7 @@ export function Station() {
             Regie
           </Link>
         ) : null}
+        <GuideButton />
         <UserButton />
       </TopBar>
       <main className="grid w-full min-w-0 grid-cols-1 gap-4 px-4 pb-8 sm:px-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
@@ -73,6 +75,7 @@ export function Station() {
         {snap ? (
           <>
             <div className="grid min-w-0 grid-cols-1 content-start gap-4">
+              <GuidePanel role={snap.me.role} />
               <Banners snap={snap} />
               <NowPlaying snap={snap} now={now} onSkip={() => run(() => skipTrack(), setSnap)} />
               <Queue snap={snap} onChange={setSnap} />
@@ -95,10 +98,7 @@ export function Station() {
             <div className="grid min-w-0 grid-cols-1 content-start gap-4">
               <Search snap={snap} onAdded={setSnap} />
               {isDesk(snap.me.role) ? <Announce onAir={setSnap} /> : null}
-              <p className="px-1 text-xs leading-5 text-subtle">
-                Ausgabe: {snap.outputLabel}. Vorschau etwa 30 Sekunden, ganze Titel aus dem Archiv ohne Abo. YouTube
-                nur im Browser. Echte Sender übernimmt das Pult nach Zeitplan.
-              </p>
+              <p className="px-1 text-xs text-subtle">Ausgabe: {snap.outputLabel}.</p>
             </div>
           </>
         ) : null}
@@ -246,19 +246,22 @@ function Queue({ snap, onChange }: { snap: StationSnapshot; onChange: (snap: Sta
         </span>
       }
     >
-      <p className="mb-4 text-sm text-muted">
-        Reihenfolge nach Upvotes. Bei {snap.queue.length === 1 ? "einem Titel" : `${snap.queue.length} Titeln`} gibt es{" "}
-        {budget.up} {budget.up === 1 ? "Upvote" : "Upvotes"} — nicht genug, um alles nach oben zu schieben. Ab{" "}
-        {snap.downvoteKick} Downvotes und mehr Gegenstimmen als Zustimmung fliegt ein Titel raus.
-      </p>
       {snap.queue.length === 0 ? (
         <p className="text-sm text-muted">Keine Wünsche. Es läuft {snap.fallbackName}.</p>
       ) : (
-        <ul className="grid min-w-0 grid-cols-1 gap-2">
-          {snap.queue.map((item, index) => (
-            <QueueRow key={item.id} item={item} index={index} snap={snap} onChange={onChange} />
-          ))}
-        </ul>
+        <>
+          <p className="mb-3 text-sm text-muted">Sortiert nach Zustimmung.</p>
+          {snap.wishPrune === "auto" ? (
+            <p className="mb-4 text-xs text-subtle">
+              Ab {snap.wishPruneAt} Wünschen fallen Titel ohne Upvote oder mit mehr Gegenstimmen weg.
+            </p>
+          ) : null}
+          <ul className="grid min-w-0 grid-cols-1 gap-2">
+            {snap.queue.map((item, index) => (
+              <QueueRow key={item.id} item={item} index={index} snap={snap} onChange={onChange} />
+            ))}
+          </ul>
+        </>
       )}
     </Panel>
   );

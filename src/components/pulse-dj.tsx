@@ -13,6 +13,7 @@ import {
 } from "@/lib/pulse/api";
 import type { DeskSnapshot } from "@/lib/pulse/types";
 import { Button, Field, Panel, TopBar, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
+import { GuideButton, GuidePanel } from "@/components/pulse-guide";
 
 export function Desk() {
   const [data, setData] = useState<DeskSnapshot | null>(null);
@@ -42,14 +43,14 @@ export function Desk() {
             Regie
           </Link>
         ) : null}
+        <GuideButton />
         <UserButton />
       </TopBar>
       <main className="grid w-full min-w-0 grid-cols-1 gap-4 px-4 pb-10 sm:px-6">
         <div className="grid gap-2">
           <h1 className="font-display text-4xl tracking-tight">Pult</h1>
           <p className="max-w-2xl text-sm text-muted">
-            Mikrofon und Aufnahmen unterbrechen die Musik. Sender können sofort oder nach dem Zeitplan aus der Regie
-            übernehmen.
+            Mikrofon und Aufnahmen unterbrechen die Musik. Sender können sofort oder nach Plan übernehmen.
           </p>
         </div>
         {!data && !error ? <p className="text-muted">Pult wird geladen.</p> : null}
@@ -60,6 +61,7 @@ export function Desk() {
         ) : null}
         {data ? (
           <>
+            <GuidePanel role={data.me.role === "admin" ? "admin" : "dj"} />
             <Mic onSaved={setData} />
             <Recordings data={data} onSaved={setData} />
             <RelayNow data={data} onSaved={setData} />
@@ -303,11 +305,7 @@ function Cue() {
   const [pending, setPending] = useState(false);
   return (
     <Panel title="Andere Quelle">
-      <p className="mb-3 text-sm text-muted">
-        YouTube-Link wird offiziell eingebettet und läuft nur in den Browsern. Eine direkte Audiodatei (mp3, m4a, ogg,
-        wav) geht auch an Sonos, sobald der Receiver steht. Ganze Titel ohne Abo sucht die Hörerschaft unter «Ganze
-        Titel».
-      </p>
+      <p className="mb-3 text-sm text-muted">YouTube nur in den Browsern. Eine Audiodatei geht mit an den Receiver.</p>
       <form
         className="flex gap-2"
         onSubmit={(event) => {

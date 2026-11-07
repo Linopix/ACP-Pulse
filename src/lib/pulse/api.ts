@@ -4,6 +4,7 @@ import { authMiddleware } from "@/lib/auth/middleware";
 import {
   MAX_OPEN_WISHES,
   clampKick,
+  clampPruneAt,
   clampVolume,
   isBlocked,
   isDesk,
@@ -12,6 +13,7 @@ import {
   parseWords,
   speechDurationMs,
   voteBudget,
+  wishesToPrune,
   youtubeId,
   type DeskRole,
   type FilterMode,
@@ -22,8 +24,10 @@ import type {
   AnnouncementRecord,
   DeskSnapshot,
   MemberRecord,
+  OutputProbe,
   PlaybackView,
   PlaylistRecord,
+  ProbeLine,
   QueueItem,
   RecordingRecord,
   RelaySlot,
@@ -279,6 +283,8 @@ function mapSettings(row: Row): SettingsRecord {
     sonosHost: asText(row.sonos_host),
     receiverUrl: asText(row.receiver_url),
     downvoteKick: clampKick(asNum(row.downvote_kick, 3)),
+    wishPrune: row.wish_prune === "off" ? "off" : "auto",
+    wishPruneAt: clampPruneAt(asNum(row.wish_prune_at, 8)),
     extraBlocklist: asText(row.extra_blocklist),
     musicSource: row.music_source === "spotify" ? "spotify" : row.music_source === "archive" ? "archive" : "preview",
     spotifyClientId: asText(row.spotify_client_id),
@@ -524,6 +530,7 @@ async function startRelay(sql: Sql, relay: RelayHit) {
 }
 
 async function advancePlayback(sql: Sql, opts?: { force?: boolean; interrupt?: boolean }) {
+  await pruneWeakWishes(sql);
   let pb = await readPlayback(sql);
   let relay = await loadActiveRelay(sql);
   const waiting = await waitingAnnouncement(sql);
@@ -709,6 +716,7 @@ async function tryDispatch(sql: Sql) {
         volume: settings.volume,
         room: settings.sonosRoom,
         output: settings.outputTarget,
+        sonosHost: settings.sonosHost,
       }),
       signal: AbortSignal.timeout(2500),
     });
@@ -888,6 +896,8 @@ async function buildSnapshot(sql: Sql, userId: string, memberName: string, email
     receiverConfigured: effective.receiverUrl.length > 0,
     musicSource: effective.musicSource,
     downvoteKick: effective.downvoteKick,
+    wishPrune: effective.wishPrune,
+    wishPruneAt: effective.wishPruneAt,
     monitorExternal: effective.monitorExternal,
     activeRule: effective.activeRule,
     relay: relay
@@ -947,6 +957,48 @@ async function refreshScores(sql: Sql, itemId: number, kickAt: number) {
   }
 }
 
+async function pruneWeakWishes(sql: Sql, opts?: { manual?: boolean }): Promise<number> {
+  const settings = await loadBaseSettings(sql);
+  const rows = await sql<Row>`
+    select id, upvotes, downvotes, created_at from queue_items where status = 'queued'
+  `;
+  const pb = await readPlayback(sql);
+  const playing = pb.queue_item_id == null ? 0 : asNum(pb.queue_item_id);
+  const ids = wishesToPrune(
+    rows.map((row) => ({
+      id: asNum(row.id),
+      upvotes: asNum(row.upvotes),
+      downvotes: asNum(row.downvotes),
+      createdAt: new Date(asIso(row.created_at) ?? 0).getTime(),
+      playing: asNum(row.id) === playing,
+    })),
+    { mode: settings.wishPrune, threshold: settings.wishPruneAt, manual: opts?.manual === true },
+  );
+  for (const id of ids) {
+    await sql`update queue_items set status = 'pruned' where id = ${id} and status = 'queued'`;
+  }
+  return ids.length;
+}
+
+let suggestedCache: { at: number; value: string } | null = null;
+
+async function suggestedReceiver(): Promise<string> {
+  if (suggestedCache && Date.now() - suggestedCache.at < 5000) return suggestedCache.value;
+  const fromEnv = httpOrigin((process.env.PULSE_RECEIVER_URL ?? "").trim());
+  let value = fromEnv;
+  const allowLocal = !process.env.VERCEL && !process.env.KUBERNETES_SERVICE_HOST;
+  if (!value && allowLocal) {
+    try {
+      const res = await fetch("http://127.0.0.1:8090/v1/health", { signal: AbortSignal.timeout(300) });
+      if (res.ok) value = "http://127.0.0.1:8090";
+    } catch {
+      value = "";
+    }
+  }
+  suggestedCache = { at: Date.now(), value };
+  return value;
+}
+
 function parseSettings(input: unknown): SettingsRecord {
   if (!input || typeof input !== "object") fail("Einstellungen unvollständig.");
   const o = input as Record<string, unknown>;
@@ -963,6 +1015,8 @@ function parseSettings(input: unknown): SettingsRecord {
     sonosHost: hostOnly(clip(o.sonosHost, 120)),
     receiverUrl: httpOrigin(clip(o.receiverUrl, 200)),
     downvoteKick: clampKick(asNum(o.downvoteKick, 3)),
+    wishPrune: o.wishPrune === "off" ? "off" : "auto",
+    wishPruneAt: clampPruneAt(asNum(o.wishPruneAt, 8)),
     extraBlocklist: parseWords(clip(o.extraBlocklist, 400)).join(", "),
     musicSource: o.musicSource === "spotify" ? "spotify" : o.musicSource === "archive" ? "archive" : "preview",
     spotifyClientId: clip(o.spotifyClientId, 80).replace(/[^\w-]/g, ""),
@@ -1068,6 +1122,7 @@ async function loadAdmin(sql: Sql, userId: string): Promise<AdminSnapshot> {
     stations,
     slots,
     nextSlot: slot ? slot.toISOString() : null,
+    suggestedReceiver: await suggestedReceiver(),
   };
 }
 
@@ -1436,6 +1491,8 @@ export const saveSettings = createServerFn({ method: "POST" })
           sonos_host = ${data.sonosHost},
           receiver_url = ${data.receiverUrl},
           downvote_kick = ${data.downvoteKick},
+          wish_prune = ${data.wishPrune},
+          wish_prune_at = ${data.wishPruneAt},
           extra_blocklist = ${data.extraBlocklist},
           music_source = ${data.musicSource},
           spotify_client_id = ${data.spotifyClientId},
@@ -1451,7 +1508,12 @@ export const saveSettings = createServerFn({ method: "POST" })
           await fetch(new URL("/v1/volume", data.receiverUrl), {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ volume: data.volume, room: data.sonosRoom, output: data.outputTarget }),
+            body: JSON.stringify({
+              volume: data.volume,
+              room: data.sonosRoom,
+              output: data.outputTarget,
+              sonosHost: data.sonosHost,
+            }),
             signal: AbortSignal.timeout(2000),
           });
         } catch {
@@ -1719,36 +1781,95 @@ export const setMemberRole = createServerFn({ method: "POST" })
     });
   });
 
-export const checkOutput = createServerFn({ method: "POST" })
+export const pruneWishes = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
+    return withRadioLock(async () => {
+      const sql = await getSql();
+      await requireAdmin(sql, context.userId);
+      const removed = await pruneWeakWishes(sql, { manual: true });
+      const admin = await loadAdmin(sql, context.userId);
+      return { ...admin, removed };
+    });
+  });
+
+export const checkOutput = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }): Promise<OutputProbe> => {
     const sql = await getSql();
     await requireAdmin(sql, context.userId);
     const settings = await loadBaseSettings(sql);
     if (settings.outputTarget === "browser") {
-      return { ok: true, detail: "Die Sendung läuft in diesem Browser. Sonos und Receiver bleiben unberührt." };
-    }
-    if (!settings.receiverUrl) {
       return {
-        ok: false,
-        detail:
-          "Noch keine Receiver-Adresse. Ein kleiner Dienst im Büro-Netz nimmt später /v1/play, /v1/volume und /v1/health entgegen — für Sonos oder für Boxen am Server.",
+        ok: true,
+        usingSaved: true,
+        detail: "Ton bleibt in diesem Browser.",
+        lines: [{ label: "Ausgabe", ok: true, detail: "Dieser Browser" }],
       };
     }
-    try {
-      const res = await fetch(new URL("/v1/health", settings.receiverUrl), {
-        signal: AbortSignal.timeout(2500),
-      });
-      if (!res.ok) return { ok: false, detail: `Receiver antwortet mit Status ${res.status}.` };
-      return { ok: true, detail: "Receiver erreichbar. Die nächste Titeländerung geht dorthin." };
-    } catch {
+    const saved = settings.receiverUrl;
+    const target = saved || (await suggestedReceiver());
+    if (!target) {
       return {
         ok: false,
-        detail:
-          "Receiver nicht erreichbar. Er muss aus diesem Netz sichtbar sein. Sonos selbst spricht nur lokal — die Bridge auf dem Mini-Server übersetzt.",
+        usingSaved: false,
+        detail: "Keine Receiver-Adresse.",
+        lines: [{ label: "Receiver", ok: false, detail: "Adresse fehlt" }],
       };
     }
+    const probe = await callReceiver(target, "/v1/probe", {
+      mode: "track",
+      url: "https://example.com/pulse-probe.mp3",
+      title: "Verbindungstest",
+      artist: "ACP Pulse",
+      text: "",
+      volume: settings.volume,
+      room: settings.sonosRoom,
+      output: settings.outputTarget,
+      sonosHost: settings.sonosHost,
+    });
+    if (!probe) {
+      const health = await callReceiver(target, "/v1/health", null);
+      return {
+        ok: false,
+        usingSaved: Boolean(saved),
+        detail: health ? "Receiver da, Prüfung unvollständig." : "Receiver nicht erreichbar.",
+        lines: [{ label: "Receiver", ok: Boolean(health), detail: health ? "Nur Gesundheit geprüft" : "Keine Antwort" }],
+      };
+    }
+    const lines = Array.isArray(probe.lines) ? probe.lines.filter(isProbeLine) : [];
+    const ok = probe.ok === true && lines.every((item) => item.ok);
+    const prefix = saved ? "" : "Noch nicht gespeichert. ";
+    return {
+      ok,
+      usingSaved: Boolean(saved),
+      detail: `${prefix}${typeof probe.detail === "string" ? probe.detail : ok ? "Prüfung in Ordnung." : "Prüfung fehlgeschlagen."}`,
+      lines,
+    };
   });
+
+function isProbeLine(value: unknown): value is ProbeLine {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.label === "string" && typeof row.ok === "boolean" && typeof row.detail === "string";
+}
+
+async function callReceiver(origin: string, path: string, body: Record<string, unknown> | null): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await fetch(new URL(path, origin), {
+      method: body ? "POST" : "GET",
+      headers: body ? { "content-type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok && path === "/v1/health") return null;
+    const json = (await res.json()) as unknown;
+    if (!json || typeof json !== "object") return null;
+    return json as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
 
 async function deskView(sql: Sql, userId: string, name: string, role: DeskRole): Promise<DeskSnapshot> {
   await bootstrapStations(sql, userId);

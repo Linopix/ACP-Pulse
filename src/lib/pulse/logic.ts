@@ -21,6 +21,12 @@ export const DEFAULT_BLOCKLIST = [
 
 export type FilterMode = "allow" | "clean" | "strict";
 export type OutputTarget = "browser" | "sonos" | "receiver";
+export type WishPruneMode = "off" | "auto";
+
+export const DEFAULT_WISH_PRUNE_AT = 8;
+
+/** Frische Wünsche bleiben kurz liegen, damit überhaupt eine Stimme ankommen kann. */
+export const WISH_GRACE_MS = 90_000;
 
 export function parseWords(raw: string): string[] {
   const seen = new Set<string>();
@@ -69,6 +75,11 @@ export function clampVolume(value: number): number {
 export function clampKick(value: number): number {
   if (!Number.isFinite(value)) return 3;
   return Math.max(2, Math.min(20, Math.round(value)));
+}
+
+export function clampPruneAt(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_WISH_PRUNE_AT;
+  return Math.max(4, Math.min(40, Math.round(value)));
 }
 
 /** Nächster Moderations-Slot, strikt in der Zukunft. */
@@ -124,4 +135,37 @@ export function youtubeId(raw: string): string | null {
     return null;
   }
   return null;
+}
+
+export type PruneCandidate = {
+  id: number;
+  upvotes: number;
+  downvotes: number;
+  createdAt: number;
+  playing: boolean;
+};
+
+/** Ohne Upvote, oder mehr Runter als Hoch (zum Beispiel 1 hoch, 2 runter). */
+export function isWeakWish(item: { upvotes: number; downvotes: number }): boolean {
+  return item.upvotes <= 0 || item.downvotes > item.upvotes;
+}
+
+/**
+ * Automatisch nur, wenn die Queue die Grenze erreicht.
+ * Manuell sofort, auch unter der Grenze und ohne Schonfrist.
+ * Der laufende Titel bleibt.
+ */
+export function wishesToPrune(
+  items: PruneCandidate[],
+  opts: { mode: WishPruneMode; threshold: number; manual?: boolean },
+  now = Date.now(),
+): number[] {
+  const queued = items.filter((item) => !item.playing);
+  if (!opts.manual && (opts.mode !== "auto" || queued.length < opts.threshold)) return [];
+  return queued
+    .filter((item) => {
+      if (!opts.manual && now - item.createdAt < WISH_GRACE_MS) return false;
+      return isWeakWish(item);
+    })
+    .map((item) => item.id);
 }
