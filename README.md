@@ -13,7 +13,7 @@ Bedienung prüfen: [`TESTLEITFADEN.md`](TESTLEITFADEN.md).
 | `/` | angemeldet | Sendung, Suche, Queue, Stimmen |
 | `/login` | alle | Konto anlegen oder anmelden |
 | `/dj` | DJ, Regie | Mikrofon, Aufnahmen, Sender jetzt, fremde Audiodatei |
-| `/admin` | Regie | Ausgabe, Programm, Kalender, Sender, Playlists, Moderation, Rollen |
+| `/admin` | Regie | Ausgabe, Programm, Musikplan, Kalender, Dienste, Sender, Playlists, Moderation, Nutzer |
 
 Das erste Konto wird Regie. Die letzte Regie kann sich nicht selbst auf Hörer oder DJ setzen. Ein DJ sieht das Pult, nicht die Regie.
 
@@ -63,11 +63,15 @@ Die eingebaute Wortliste ist `DEFAULT_BLOCKLIST`. Die Regie ergänzt sie komma- 
 | --- | --- | --- |
 | `preview` | Suche «30s Vorschau» | iTunes-Vorschau, etwa 30 Sekunden |
 | `archive` | Suche «Ganze Titel» | Internet Archive, ganze MP3, ohne Abo |
-| `youtube` | Pult, YouTube-Link | oEmbed plus iframe, nur Browser |
+| `youtube` | Dienst «YouTube», Suche oder Link | oEmbed, Innertube oder API-Schlüssel. Nur Browser |
 | `link` | Pult, direkte Audiodatei | mp3, m4a, ogg, wav über https |
-| `spotify` | Programm, Schalter | noch nicht verbunden; die Suche verweist auf «Ganze Titel» |
+| `spotify` | Dienst «Spotify» | Client Credentials. Metadaten von Spotify, Ton über Vorschau oder 30s-Ersatz |
 
-Spotify ist bewusst nur ein Schalter. Sobald ein Client angebunden ist, bleibt der Rest der Queue gleich: `TrackInput` kennt `source` und `externalId`.
+YouTube und Spotify sind Dienste unter Regie → Dienste, nicht nur ein Schalter. Ohne Zugangsdaten sucht YouTube öffentlich, Spotify bleibt stumm, bis Client-ID und Geheimnis da sind. `TrackInput` kennt weiter `source` und `externalId`.
+
+Microsoft 365 liest einen Kalender (App mit Calendars.Read oder ein ICS aus Outlook) in den Musikplan. Piper spricht Durchsagen mit Kerstin oder Eva, beides weiblich. Ohne Piper-Adresse auf dem Pi spricht der Browser, mit Adresse geht dieselbe Ansage als Datei an die Boxen.
+
+Der Musikplan setzt pro Block Lautstärke, Wünsche, Filter und Energie. Das Pult zeigt denselben Tag als Laufplan mit Stimmung, Sprechpunkten und der ausführlichen Notiz.
 
 ## Ausgabe
 
@@ -107,6 +111,7 @@ Migrationen in [`migrations/`](migrations/):
 | `0002_pulse.sql` | Mitglieder, Einstellungen, Playlists, Queue, Stimmen, Playback, Durchsagen |
 | `0003_desk.sql` | Aufnahmen, Sender, Zeitfenster |
 | `0004_prune.sql` | `wish_prune`, `wish_prune_at` |
+| `0005_services.sql` | Dienste, Nutzerstatus, Piper-Stimme, Musikplan |
 
 Ohne `DATABASE_URL` läuft Postgres im Prozess (PGLite). Mit gesetzter URL ist es Neon, ohne Codeänderung. Typen der Antworten: [`src/lib/pulse/types.ts`](src/lib/pulse/types.ts).
 

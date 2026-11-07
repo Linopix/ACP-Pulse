@@ -1,0 +1,238 @@
+/** Spotify, YouTube, Microsoft 365 und Piper. Geheimnisse gehen nur zum Server, nie zurück. */
+import { useState } from "react";
+import { toast } from "sonner";
+import { saveService, testService } from "@/lib/pulse/api";
+import { PIPER_VOICES, type PiperVoiceId } from "@/lib/pulse/logic";
+import type { AdminSnapshot, ServiceState } from "@/lib/pulse/types";
+import { piperLine, speakPiper } from "@/lib/pulse/voice";
+import { Button, Field, Panel, errorText, fieldClass } from "@/components/pulse-ui";
+
+export function ServicesDesk({
+  services,
+  onSaved,
+}: {
+  services: ServiceState;
+  onSaved: (next: AdminSnapshot) => void;
+}) {
+  return (
+    <div className="grid gap-4">
+      <SpotifyCard services={services} onSaved={onSaved} />
+      <YouTubeCard services={services} onSaved={onSaved} />
+      <OfficeCard services={services} onSaved={onSaved} />
+      <PiperCard services={services} onSaved={onSaved} />
+    </div>
+  );
+}
+
+function SpotifyCard({ services, onSaved }: { services: ServiceState; onSaved: (next: AdminSnapshot) => void }) {
+  const [enabled, setEnabled] = useState(services.spotify.enabled);
+  const [clientId, setClientId] = useState(services.spotify.clientId);
+  const [secret, setSecret] = useState("");
+  return (
+    <Panel title="Spotify">
+      <p className="mb-3 text-sm text-muted">
+        Dieselbe Suche wie die anderen Quellen. Client Credentials aus dem Spotify-Dashboard. Ohne Vorschau-URL nimmt die
+        Sendung eine 30-Sekunden-Datei, die Metadaten bleiben von Spotify.
+      </p>
+      <Status detail={services.spotify.detail} />
+      <form
+        className="grid gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void saveService({ data: { id: "spotify", enabled, clientId, secret } })
+            .then((next) => {
+              onSaved(next);
+              setSecret("");
+              toast.success("Spotify gespeichert.");
+            })
+            .catch((caught) => toast.error(errorText(caught)));
+        }}
+      >
+        <Toggle checked={enabled} onChange={setEnabled} label="Suche zulassen" />
+        <Field label="Client-ID">
+          <input className={fieldClass} value={clientId} onChange={(event) => setClientId(event.target.value)} />
+        </Field>
+        <Field label="Geheimnis" hint={services.spotify.secretSet ? "Gesetzt. Leer lassen, um es zu behalten." : "Noch keins."}>
+          <input className={fieldClass} type="password" value={secret} autoComplete="off" onChange={(event) => setSecret(event.target.value)} />
+        </Field>
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit">Speichern</Button>
+          <Button type="button" variant="line" onClick={() => void probe("spotify", onSaved)}>
+            Verbindung prüfen
+          </Button>
+        </div>
+      </form>
+    </Panel>
+  );
+}
+
+function YouTubeCard({ services, onSaved }: { services: ServiceState; onSaved: (next: AdminSnapshot) => void }) {
+  const [enabled, setEnabled] = useState(services.youtube.enabled);
+  const [secret, setSecret] = useState("");
+  return (
+    <Panel title="YouTube">
+      <p className="mb-3 text-sm text-muted">
+        Eigener Dienst neben Spotify. Hörer können suchen oder einen Link legen, sobald der Schalter an ist. Der Ton bleibt
+        im Browser. Ein API-Schlüssel ist freiwillig und schärft die Treffer.
+      </p>
+      <Status detail={services.youtube.detail} />
+      <form
+        className="grid gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void saveService({ data: { id: "youtube", enabled, secret } })
+            .then((next) => {
+              onSaved(next);
+              setSecret("");
+              toast.success("YouTube gespeichert.");
+            })
+            .catch((caught) => toast.error(errorText(caught)));
+        }}
+      >
+        <Toggle checked={enabled} onChange={setEnabled} label="Als Musikquelle anbieten" />
+        <Field label="API-Schlüssel" hint={services.youtube.keySet ? "Gesetzt. Leer lassen, um ihn zu behalten." : "Ohne Schlüssel die öffentliche Suche."}>
+          <input className={fieldClass} type="password" value={secret} autoComplete="off" onChange={(event) => setSecret(event.target.value)} />
+        </Field>
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit">Speichern</Button>
+          <Button type="button" variant="line" onClick={() => void probe("youtube", onSaved)}>
+            Verbindung prüfen
+          </Button>
+        </div>
+      </form>
+    </Panel>
+  );
+}
+
+function OfficeCard({ services, onSaved }: { services: ServiceState; onSaved: (next: AdminSnapshot) => void }) {
+  const [enabled, setEnabled] = useState(services.o365.enabled);
+  const [tenant, setTenant] = useState(services.o365.tenant);
+  const [clientId, setClientId] = useState(services.o365.clientId);
+  const [mailbox, setMailbox] = useState(services.o365.mailbox);
+  const [secret, setSecret] = useState("");
+  return (
+    <Panel title="Microsoft 365">
+      <p className="mb-3 text-sm text-muted">
+        App-Registrierung mit Calendars.Read, Client Secret, und das Postfach, dessen Kalender in den Musikplan soll.
+        Termine der nächsten zwei Tage werden Blöcke, mit Lautstärke-Wunsch aus dem Text.
+      </p>
+      <Status detail={services.o365.detail} />
+      <form
+        className="grid gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void saveService({ data: { id: "o365", enabled, tenant, clientId, mailbox, secret } })
+            .then((next) => {
+              onSaved(next);
+              setSecret("");
+              toast.success("Microsoft 365 gespeichert.");
+            })
+            .catch((caught) => toast.error(errorText(caught)));
+        }}
+      >
+        <Toggle checked={enabled} onChange={setEnabled} label="Kalender darf gelesen werden" />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Mandant">
+            <input className={fieldClass} value={tenant} onChange={(event) => setTenant(event.target.value)} placeholder="firma.onmicrosoft.com" />
+          </Field>
+          <Field label="Client-ID">
+            <input className={fieldClass} value={clientId} onChange={(event) => setClientId(event.target.value)} />
+          </Field>
+        </div>
+        <Field label="Postfach">
+          <input className={fieldClass} value={mailbox} onChange={(event) => setMailbox(event.target.value)} placeholder="studio@firma.de" />
+        </Field>
+        <Field label="Geheimnis" hint={services.o365.secretSet ? "Gesetzt. Leer lassen, um es zu behalten." : "Client Secret der App."}>
+          <input className={fieldClass} type="password" value={secret} autoComplete="off" onChange={(event) => setSecret(event.target.value)} />
+        </Field>
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit">Speichern</Button>
+          <Button type="button" variant="line" onClick={() => void probe("o365", onSaved)}>
+            Verbindung prüfen
+          </Button>
+        </div>
+      </form>
+    </Panel>
+  );
+}
+
+function PiperCard({ services, onSaved }: { services: ServiceState; onSaved: (next: AdminSnapshot) => void }) {
+  const [enabled, setEnabled] = useState(services.piper.enabled);
+  const [voice, setVoice] = useState<PiperVoiceId>(services.piper.voice);
+  const [endpoint, setEndpoint] = useState(services.piper.endpoint);
+  const current = PIPER_VOICES.find((item) => item.id === voice) ?? PIPER_VOICES[0]!;
+  return (
+    <Panel title="Piper">
+      <p className="mb-3 text-sm text-muted">
+        Weibliche Sendestimme. {current.name}, {current.detail}. Im Browser spricht die deutsche Frauenstimme dieses
+        Profil. Liegt die Piper-Adresse eines Pi vor, kommt dieselbe Ansage als Datei auf Sonos und Receiver.
+      </p>
+      <Status detail={services.piper.detail} />
+      <form
+        className="grid gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void saveService({ data: { id: "piper", enabled, voice, endpoint } })
+            .then((next) => {
+              onSaved(next);
+              toast.success("Piper gespeichert.");
+            })
+            .catch((caught) => toast.error(errorText(caught)));
+        }}
+      >
+        <Toggle checked={enabled} onChange={setEnabled} label="Piper für Durchsagen" />
+        <Field label="Stimme">
+          <select className={fieldClass} value={voice} onChange={(event) => setVoice(event.target.value as PiperVoiceId)}>
+            {PIPER_VOICES.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name} · {item.detail}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Piper-Adresse" hint="Leer: nur Browser. Sonst POST mit Text und Stimme, Antwort audio/wav.">
+          <input className={fieldClass} value={endpoint} placeholder="http://piper.local:5000" onChange={(event) => setEndpoint(event.target.value)} />
+        </Field>
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit">Speichern</Button>
+          <Button
+            type="button"
+            variant="line"
+            onClick={() => {
+              speakPiper(piperLine(voice), voice);
+              toast.success(`${current.name} spricht hier.`);
+            }}
+          >
+            Stimme hören
+          </Button>
+          <Button type="button" variant="line" onClick={() => void probe("piper", onSaved)}>
+            Verbindung prüfen
+          </Button>
+        </div>
+      </form>
+    </Panel>
+  );
+}
+
+function Status({ detail }: { detail: string }) {
+  return <p className="mb-3 text-sm text-ink">{detail || "Noch nicht geprüft."}</p>;
+}
+
+function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (value: boolean) => void; label: string }) {
+  return (
+    <label className="flex items-center gap-3 text-sm">
+      <input type="checkbox" className="h-5 w-5 accent-signal" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      {label}
+    </label>
+  );
+}
+
+function probe(id: "spotify" | "youtube" | "o365" | "piper", onSaved: (next: AdminSnapshot) => void) {
+  return testService({ data: { id } })
+    .then((result) => {
+      onSaved(result.snapshot);
+      if (result.ok) toast.success(result.detail);
+      else toast.error(result.detail);
+    })
+    .catch((caught) => toast.error(errorText(caught)));
+}

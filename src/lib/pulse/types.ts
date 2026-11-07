@@ -3,7 +3,7 @@
  * `StationSnapshot` ist die Sendung, `DeskSnapshot` das Pult, `AdminSnapshot` die Regie.
  * Regeln, die diese Werte erzeugen, stehen in logic.ts und api.ts — nicht hier.
  */
-import type { DeskRole, FilterMode, OutputTarget, WishPruneMode } from "@/lib/pulse/logic";
+import type { DeskRole, FilterMode, OutputTarget, PiperVoiceId, PlanEnergy, PlanKind, WishPruneMode } from "@/lib/pulse/logic";
 
 export type TrackSource = "preview" | "spotify" | "archive" | "youtube" | "link";
 
@@ -48,6 +48,8 @@ export type PlaybackView = {
   live: boolean;
   youtubeId: string;
   recordingId: number | null;
+  /** Piper-Stimme für Text-Durchsagen. Leer, wenn gerade nichts gesprochen wird. */
+  voiceId: string;
 };
 
 export type ActiveRule = {
@@ -65,7 +67,7 @@ export type StationSnapshot = {
   outputTarget: OutputTarget;
   outputLabel: string;
   receiverConfigured: boolean;
-  musicSource: "preview" | "spotify" | "archive";
+  musicSource: "preview" | "spotify" | "archive" | "youtube";
   downvoteKick: number;
   wishPrune: WishPruneMode;
   wishPruneAt: number;
@@ -84,6 +86,10 @@ export type StationSnapshot = {
   };
   openWishes: number;
   fallbackName: string;
+  piperVoice: PiperVoiceId;
+  piperName: string;
+  youtubeOn: boolean;
+  spotifyOn: boolean;
 };
 
 export type RuleRecord = {
@@ -113,6 +119,7 @@ export type MemberRecord = {
   email: string;
   role: DeskRole;
   mine: boolean;
+  disabled: boolean;
 };
 
 export type AnnouncementRecord = {
@@ -138,7 +145,7 @@ export type SettingsRecord = {
   wishPrune: WishPruneMode;
   wishPruneAt: number;
   extraBlocklist: string;
-  musicSource: "preview" | "spotify" | "archive";
+  musicSource: "preview" | "spotify" | "archive" | "youtube";
   spotifyClientId: string;
   moderatorEnabled: boolean;
   moderatorSlots: string;
@@ -173,11 +180,61 @@ export type RecordingRecord = {
   createdAt: string;
 };
 
+export type PlanBlock = {
+  id: number;
+  title: string;
+  kind: PlanKind;
+  startsAt: string;
+  endsAt: string;
+  volume: number | null;
+  wishesEnabled: boolean | null;
+  explicitFilter: FilterMode | null;
+  energy: PlanEnergy;
+  wishNote: string;
+  mood: string;
+  djBrief: string;
+  talkPoints: string;
+  stationId: number | null;
+  stationName: string;
+  source: "manual" | "o365";
+  active: boolean;
+  past: boolean;
+};
+
+export type PlanInput = {
+  id?: number;
+  title: string;
+  kind: PlanKind;
+  startsAt: string;
+  endsAt: string;
+  volume: number | null;
+  wishesEnabled: boolean | null;
+  explicitFilter: FilterMode | null;
+  energy: PlanEnergy;
+  wishNote: string;
+  mood: string;
+  djBrief: string;
+  talkPoints: string;
+  stationId: number | null;
+};
+
+export type ServiceId = "spotify" | "youtube" | "o365" | "piper";
+
+export type ServiceState = {
+  spotify: { enabled: boolean; clientId: string; secretSet: boolean; detail: string };
+  youtube: { enabled: boolean; keySet: boolean; detail: string };
+  o365: { enabled: boolean; tenant: string; clientId: string; mailbox: string; secretSet: boolean; detail: string };
+  piper: { enabled: boolean; voice: PiperVoiceId; endpoint: string; detail: string };
+};
+
 export type DeskSnapshot = {
   me: { id: string; name: string; role: DeskRole };
   recordings: RecordingRecord[];
   stations: RelayStation[];
   slots: RelaySlot[];
+  plan: PlanBlock[];
+  piperVoice: PiperVoiceId;
+  piperName: string;
 };
 
 export type AdminSnapshot = {
@@ -188,6 +245,8 @@ export type AdminSnapshot = {
   announcements: AnnouncementRecord[];
   stations: RelayStation[];
   slots: RelaySlot[];
+  plan: PlanBlock[];
+  services: ServiceState;
   nextSlot: string | null;
   suggestedReceiver: string;
 };

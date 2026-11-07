@@ -41,7 +41,7 @@ function stepsFor(role: DeskRole) {
     },
     {
       title: "Wünschen",
-      body: "Suchen, dann Dazu. Drei offene Wünsche pro Person. «30s Vorschau» oder «Ganze Titel» aus dem Archiv.",
+      body: "Suchen, dann Dazu. Drei offene Wünsche pro Person. 30 Sekunden, ganze Titel, und wenn die Regie sie angeschaltet hat YouTube oder Spotify.",
     },
     {
       title: "Stimmen",
@@ -57,7 +57,7 @@ function stepsFor(role: DeskRole) {
   if (role === "dj" || role === "admin") {
     steps.push({
       title: "Pult",
-      body: "Mikrofon und Aufnahmen unterbrechen die Musik. Sender können sofort übernehmen. YouTube bleibt in den Browsern, eine Audiodatei geht mit an den Receiver.",
+      body: "Mikrofon, Piper und Aufnahmen unterbrechen die Musik. Der Laufplan sagt Lautstärke, Wünsche und was du sagst. YouTube bleibt in den Browsern.",
     });
   }
   if (role === "admin") {

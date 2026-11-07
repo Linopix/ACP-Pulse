@@ -14,6 +14,8 @@ import { getSql, type Sql } from "@/lib/db";
 import { authMiddleware } from "@/lib/auth/middleware";
 import {
   MAX_OPEN_WISHES,
+  asPlanEnergy,
+  asPlanKind,
   clampKick,
   clampPruneAt,
   clampVolume,
@@ -21,21 +23,28 @@ import {
   isDesk,
   nextSlot,
   outputLabel,
+  parseIcs,
   parseWords,
+  piperVoice,
   speechDurationMs,
   voteBudget,
+  wishFromText,
   wishesToPrune,
   youtubeId,
   type DeskRole,
   type FilterMode,
   type OutputTarget,
+  type PiperVoiceId,
 } from "@/lib/pulse/logic";
+import { fetchPiper, graphEvents, graphToken, searchSpotify, searchYoutube, spotifyToken } from "@/lib/pulse/services";
 import type {
   AdminSnapshot,
   AnnouncementRecord,
   DeskSnapshot,
   MemberRecord,
   OutputProbe,
+  PlanBlock,
+  PlanInput,
   PlaybackView,
   PlaylistRecord,
   ProbeLine,
@@ -45,6 +54,8 @@ import type {
   RelayStation,
   RuleInput,
   RuleRecord,
+  ServiceId,
+  ServiceState,
   SettingsRecord,
   StationSnapshot,
   TrackInput,
@@ -258,9 +269,10 @@ async function ensureMember(sql: Sql, userId: string, name: string) {
     where user_id = ${userId}
       and not exists (select 1 from members where role = 'admin')
   `;
-  const rows = await sql<Row>`select user_id, display_name, role from members where user_id = ${userId}`;
+  const rows = await sql<Row>`select user_id, display_name, role, disabled from members where user_id = ${userId}`;
   const row = rows[0];
   if (!row) fail("Profil fehlt.");
+  if (asBool(row.disabled)) fail("Dieses Konto ist von der Regie gesperrt.");
   return {
     id: userId,
     name: asText(row.display_name) || name,
@@ -297,7 +309,14 @@ function mapSettings(row: Row): SettingsRecord {
     wishPrune: row.wish_prune === "off" ? "off" : "auto",
     wishPruneAt: clampPruneAt(asNum(row.wish_prune_at, 8)),
     extraBlocklist: asText(row.extra_blocklist),
-    musicSource: row.music_source === "spotify" ? "spotify" : row.music_source === "archive" ? "archive" : "preview",
+    musicSource:
+      row.music_source === "spotify"
+        ? "spotify"
+        : row.music_source === "archive"
+          ? "archive"
+          : row.music_source === "youtube"
+            ? "youtube"
+            : "preview",
     spotifyClientId: asText(row.spotify_client_id),
     moderatorEnabled: asBool(row.moderator_enabled),
     moderatorSlots: asText(row.moderator_slots) || "09:00,12:30,16:00",
@@ -317,21 +336,46 @@ async function loadEffective(sql: Sql): Promise<Effective> {
     limit 1
   `;
   const rule = rules[0];
-  if (!rule) return { ...base, activeRule: null };
-  const volume = rule.volume == null ? base.volume : clampVolume(asNum(rule.volume));
-  const wishes = rule.wishes_enabled == null ? base.wishesEnabled : asBool(rule.wishes_enabled);
-  const filter = asFilterOrNull(rule.explicit_filter) ?? base.explicitFilter;
+  const blocks = await sql<Row>`
+    select * from plan_blocks
+    where starts_at <= now() and ends_at >= now()
+    order by starts_at desc
+    limit 1
+  `;
+  const block = blocks[0];
+  const baseRule = !rule
+    ? null
+    : {
+        id: asNum(rule.id),
+        title: asText(rule.title),
+        endsAt: asIso(rule.ends_at) ?? new Date().toISOString(),
+        note: asText(rule.note),
+      };
+  if (!rule && !block) return { ...base, activeRule: null };
+  const volume = block?.volume != null
+    ? clampVolume(asNum(block.volume))
+    : rule?.volume == null
+      ? base.volume
+      : clampVolume(asNum(rule.volume));
+  const wishes = block?.wishes_enabled != null
+    ? asBool(block.wishes_enabled)
+    : rule?.wishes_enabled == null
+      ? base.wishesEnabled
+      : asBool(rule.wishes_enabled);
+  const filter = asFilterOrNull(block?.explicit_filter) ?? asFilterOrNull(rule?.explicit_filter) ?? base.explicitFilter;
   return {
     ...base,
     volume,
     wishesEnabled: wishes,
     explicitFilter: filter,
-    activeRule: {
-      id: asNum(rule.id),
-      title: asText(rule.title),
-      endsAt: asIso(rule.ends_at) ?? new Date().toISOString(),
-      note: asText(rule.note),
-    },
+    activeRule: block
+      ? {
+          id: asNum(block.id),
+          title: asText(block.title),
+          endsAt: asIso(block.ends_at) ?? new Date().toISOString(),
+          note: asText(block.wish_note) || asText(block.mood),
+        }
+      : baseRule,
   };
 }
 
@@ -752,6 +796,7 @@ async function buildNow(sql: Sql, pb: Row): Promise<PlaybackView> {
     live: false,
     youtubeId: "",
     recordingId: null as number | null,
+    voiceId: "",
   };
   if (mode === "announcement" && pb.announcement_id != null) {
     const rows = await sql<Row>`select * from announcements where id = ${asNum(pb.announcement_id)}`;
@@ -759,17 +804,20 @@ async function buildNow(sql: Sql, pb: Row): Promise<PlaybackView> {
     const title = asText(row?.title) || "Durchsage";
     const recordingId = row?.recording_id == null ? null : asNum(row.recording_id);
     const kind = asText(row?.kind);
+    const voice = piperVoice(asText(row?.voice));
+    const spoken = kind === "piper" || asText(row?.voice).length > 0;
     return {
       ...base,
       mode: "announcement",
       key: `announcement:${asText(pb.announcement_id)}:${startedAt}`,
       title,
-      subtitle: asText(row?.created_by_name) || "Pult",
+      subtitle: spoken ? `Piper · ${voice.name}` : asText(row?.created_by_name) || "Pult",
       artworkUrl: "",
       audioUrl: "",
       announcementBody: recordingId ? "" : asText(row?.body),
-      via: kind === "moderator" ? "Moderation" : kind === "mic" ? "Mikrofon" : "Durchsage",
+      via: spoken ? `Piper · ${voice.name}` : kind === "moderator" ? "Moderation" : kind === "mic" ? "Mikrofon" : "Durchsage",
       recordingId,
+      voiceId: spoken ? voice.id : "",
     };
   }
   if (mode === "relay" && pb.relay_slot_id != null) {
@@ -899,6 +947,7 @@ async function buildSnapshot(sql: Sql, userId: string, memberName: string, email
   const lists = await sql<Row>`select name from playlists where is_fallback = true limit 1`;
   const budgetBase = voteBudget(queue.length);
   const relay = await loadActiveRelay(sql);
+  const services = await loadServices(sql);
   return {
     me: { id: userId, name: memberName, email, role },
     wishesEnabled: effective.wishesEnabled,
@@ -936,6 +985,10 @@ async function buildSnapshot(sql: Sql, userId: string, memberName: string, email
     },
     openWishes: asNum(open[0]?.n),
     fallbackName: asText(lists[0]?.name) || "Hausplaylist",
+    piperVoice: services.piper.voice,
+    piperName: piperVoice(services.piper.voice).name,
+    youtubeOn: services.youtube.enabled,
+    spotifyOn: services.spotify.enabled,
   };
 }
 
@@ -944,6 +997,7 @@ async function sessionSnapshot(sql: Sql, userId: string) {
   const member = await ensureMember(sql, userId, identity.name);
   await bootstrapPlaylist(sql, userId);
   await bootstrapStations(sql, userId);
+  await bootstrapDesk(sql, userId);
   await advancePlayback(sql);
   return buildSnapshot(sql, userId, member.name, identity.email, member.role);
 }
@@ -1033,7 +1087,14 @@ function parseSettings(input: unknown): SettingsRecord {
     wishPrune: o.wishPrune === "off" ? "off" : "auto",
     wishPruneAt: clampPruneAt(asNum(o.wishPruneAt, 8)),
     extraBlocklist: parseWords(clip(o.extraBlocklist, 400)).join(", "),
-    musicSource: o.musicSource === "spotify" ? "spotify" : o.musicSource === "archive" ? "archive" : "preview",
+    musicSource:
+      o.musicSource === "spotify"
+        ? "spotify"
+        : o.musicSource === "archive"
+          ? "archive"
+          : o.musicSource === "youtube"
+            ? "youtube"
+            : "preview",
     spotifyClientId: clip(o.spotifyClientId, 80).replace(/[^\w-]/g, ""),
     moderatorEnabled: o.moderatorEnabled === true,
     moderatorSlots: slots || "09:00,12:30,16:00",
@@ -1074,7 +1135,7 @@ async function loadAdmin(sql: Sql, userId: string): Promise<AdminSnapshot> {
   const playlists = await sql<Row>`select * from playlists order by is_fallback desc, name asc`;
   const tracks = await sql<Row>`select * from playlist_tracks order by position asc, id asc`;
   const members = await sql<Row>`
-    select m.user_id, m.display_name, m.role, u.email
+    select m.user_id, m.display_name, m.role, m.disabled, u.email
     from members m
     left join "user" u on u."id" = m.user_id
     order by m.created_at asc
@@ -1123,6 +1184,7 @@ async function loadAdmin(sql: Sql, userId: string): Promise<AdminSnapshot> {
       email: asText(row.email),
       role: asRole(row.role),
       mine: asText(row.user_id) === userId,
+      disabled: asBool(row.disabled),
     })) satisfies MemberRecord[],
     announcements: anns.map((row) => ({
       id: asNum(row.id),
@@ -1136,6 +1198,8 @@ async function loadAdmin(sql: Sql, userId: string): Promise<AdminSnapshot> {
     })) satisfies AnnouncementRecord[],
     stations,
     slots,
+    plan: await loadPlan(sql),
+    services: publishServices(await loadServices(sql)),
     nextSlot: slot ? slot.toISOString() : null,
     suggestedReceiver: await suggestedReceiver(),
   };
@@ -1304,15 +1368,24 @@ export const searchMusic = createServerFn({ method: "POST" })
   .validator((input: { query?: string; catalog?: string }) => {
     const query = clip(input?.query, 80);
     if (query.length < 2) fail("Mindestens 2 Zeichen.");
-    return { query, catalog: input?.catalog === "archive" ? ("archive" as const) : ("preview" as const) };
+    const catalog =
+      input?.catalog === "archive" || input?.catalog === "youtube" || input?.catalog === "spotify"
+        ? input.catalog
+        : "preview";
+    return { query, catalog };
   })
   .middleware([authMiddleware])
   .handler(async ({ data }) => {
     if (data.catalog === "archive") return searchArchive(data.query);
     const sql = await getSql();
-    const settings = await loadBaseSettings(sql);
-    if (settings.musicSource === "spotify") {
-      fail("Spotify ist noch nicht verbunden. Für die Testphase «Ganze Titel» wählen, das ist Internet Archive ohne Abo.");
+    const services = await loadServices(sql);
+    if (data.catalog === "youtube") {
+      if (!services.youtube.enabled) fail("YouTube ist in der Regie ausgeschaltet.");
+      return searchYoutube(data.query, services.youtube.key);
+    }
+    if (data.catalog === "spotify") {
+      if (!services.spotify.enabled) fail("Spotify ist in der Regie ausgeschaltet.");
+      return searchSpotify(data.query, services.spotify.clientId, services.spotify.secret);
     }
     return searchItunes(data.query);
   });
@@ -1333,8 +1406,12 @@ export const addWish = createServerFn({ method: "POST" })
       if (isBlocked(data, effective.explicitFilter, parseWords(effective.extraBlocklist))) {
         fail("Dieser Titel ist für das aktuelle Programm gesperrt.");
       }
-      if ((data.source === "youtube" || data.source === "link") && !isDesk(member.role)) {
-        fail("Links und YouTube legt das Pult auf.");
+      if (data.source === "link" && !isDesk(member.role)) {
+        fail("Direkte Audiodateien legt das Pult auf.");
+      }
+      if (data.source === "youtube" && !isDesk(member.role)) {
+        const services = await loadServices(sql);
+        if (!services.youtube.enabled) fail("YouTube ist gerade aus. Das Pult kann Links trotzdem legen.");
       }
       const open = await sql<Row>`
         select count(*)::int as n from queue_items
@@ -1485,6 +1562,7 @@ export const getAdmin = createServerFn({ method: "GET" })
       await requireAdmin(sql, context.userId);
       await bootstrapPlaylist(sql, context.userId);
       await bootstrapStations(sql, context.userId);
+      await bootstrapDesk(sql, context.userId);
       return loadAdmin(sql, context.userId);
     });
   });
@@ -1888,11 +1966,16 @@ async function callReceiver(origin: string, path: string, body: Record<string, u
 
 async function deskView(sql: Sql, userId: string, name: string, role: DeskRole): Promise<DeskSnapshot> {
   await bootstrapStations(sql, userId);
+  await bootstrapDesk(sql, userId);
+  const services = await loadServices(sql);
   return {
     me: { id: userId, name, role },
     recordings: await loadRecordings(sql),
     stations: await loadStations(sql),
     slots: await loadSlots(sql),
+    plan: await loadPlan(sql),
+    piperVoice: services.piper.voice,
+    piperName: piperVoice(services.piper.voice).name,
   };
 }
 
@@ -2201,4 +2284,715 @@ export const startRelayNow = createServerFn({ method: "POST" })
       return deskView(sql, context.userId, desk.name, desk.role);
     });
   });
+
+type Links = {
+  spotify: { enabled: boolean; clientId: string; secret: string; detail: string };
+  youtube: { enabled: boolean; key: string; detail: string };
+  o365: { enabled: boolean; tenant: string; clientId: string; mailbox: string; secret: string; detail: string };
+  piper: { enabled: boolean; voice: PiperVoiceId; endpoint: string; detail: string };
+};
+
+async function bootstrapDesk(sql: Sql, userId: string) {
+  await ensureServiceRows(sql);
+  await bootstrapPlan(sql, userId);
+}
+
+async function ensureServiceRows(sql: Sql) {
+  const defaults: [string, boolean, string, string][] = [
+    ["spotify", false, "Noch nicht verbunden.", JSON.stringify({ clientId: "" })],
+    ["youtube", true, "Suche über YouTube. Wiedergabe bleibt im Browser.", "{}"],
+    ["o365", false, "Kalender noch nicht verbunden. Ein ICS-Export aus Outlook geht auch ohne App.", JSON.stringify({ tenant: "", clientId: "", mailbox: "" })],
+    [
+      "piper",
+      true,
+      "Kerstin spricht im Browser. Eine Piper-Adresse legt dieselbe Ansage auf die Boxen.",
+      JSON.stringify({ voice: "de_DE-kerstin-low", endpoint: "" }),
+    ],
+  ];
+  for (const [id, enabled, detail, config] of defaults) {
+    await sql`
+      insert into service_links (id, enabled, detail, config)
+      values (${id}, ${enabled}, ${detail}, ${config})
+      on conflict (id) do nothing
+    `;
+  }
+}
+
+async function loadServices(sql: Sql): Promise<Links> {
+  await ensureServiceRows(sql);
+  const rows = await sql<Row>`select * from service_links`;
+  const byId = new Map(rows.map((row) => [asText(row.id), row]));
+  const spotify = byId.get("spotify") ?? {};
+  const youtube = byId.get("youtube") ?? {};
+  const o365 = byId.get("o365") ?? {};
+  const piper = byId.get("piper") ?? {};
+  const spotifyConfig = readConfig(spotify.config);
+  const o365Config = readConfig(o365.config);
+  const piperConfig = readConfig(piper.config);
+  return {
+    spotify: {
+      enabled: asBool(spotify.enabled),
+      clientId: clip(spotifyConfig.clientId, 80).replace(/[^\w-]/g, ""),
+      secret: asText(spotify.secret),
+      detail: asText(spotify.detail),
+    },
+    youtube: {
+      enabled: asBool(youtube.enabled),
+      key: asText(youtube.secret),
+      detail: asText(youtube.detail),
+    },
+    o365: {
+      enabled: asBool(o365.enabled),
+      tenant: clip(o365Config.tenant, 80).replace(/[^\w.-]/g, ""),
+      clientId: clip(o365Config.clientId, 80).replace(/[^\w-]/g, ""),
+      mailbox: clip(o365Config.mailbox, 120),
+      secret: asText(o365.secret),
+      detail: asText(o365.detail),
+    },
+    piper: {
+      enabled: asBool(piper.enabled),
+      voice: piperVoice(asText(piperConfig.voice)).id,
+      endpoint: piperEndpoint(asText(piperConfig.endpoint)),
+      detail: asText(piper.detail),
+    },
+  };
+}
+
+function publishServices(links: Links): ServiceState {
+  return {
+    spotify: {
+      enabled: links.spotify.enabled,
+      clientId: links.spotify.clientId,
+      secretSet: links.spotify.secret.length > 0,
+      detail: links.spotify.detail,
+    },
+    youtube: {
+      enabled: links.youtube.enabled,
+      keySet: links.youtube.key.length > 0,
+      detail: links.youtube.detail,
+    },
+    o365: {
+      enabled: links.o365.enabled,
+      tenant: links.o365.tenant,
+      clientId: links.o365.clientId,
+      mailbox: links.o365.mailbox,
+      secretSet: links.o365.secret.length > 0,
+      detail: links.o365.detail,
+    },
+    piper: {
+      enabled: links.piper.enabled,
+      voice: links.piper.voice,
+      endpoint: links.piper.endpoint,
+      detail: links.piper.detail,
+    },
+  };
+}
+
+function readConfig(value: unknown): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(asText(value) || "{}") as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return parsed as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function piperEndpoint(value: string): string {
+  const origin = httpOrigin(value);
+  if (!origin) return "";
+  try {
+    const url = new URL(value.trim());
+    return `${origin}${url.pathname === "/" ? "" : url.pathname}`.slice(0, 200);
+  } catch {
+    return origin;
+  }
+}
+
+async function loadPlan(sql: Sql): Promise<PlanBlock[]> {
+  const rows = await sql<Row>`
+    select p.*, coalesce(s.name, '') as station_name
+    from plan_blocks p
+    left join relay_stations s on s.id = p.station_id
+    where p.ends_at >= date_trunc('day', now())
+      and p.starts_at < date_trunc('day', now()) + interval '2 days'
+    order by p.starts_at asc, p.id asc
+  `;
+  const now = Date.now();
+  return rows.map((row) => {
+    const startsAt = asIso(row.starts_at) ?? "";
+    const endsAt = asIso(row.ends_at) ?? "";
+    const startMs = new Date(startsAt).getTime();
+    const endMs = new Date(endsAt).getTime();
+    return {
+      id: asNum(row.id),
+      title: asText(row.title),
+      kind: asPlanKind(asText(row.kind)),
+      startsAt,
+      endsAt,
+      volume: row.volume == null ? null : clampVolume(asNum(row.volume)),
+      wishesEnabled: row.wishes_enabled == null ? null : asBool(row.wishes_enabled),
+      explicitFilter: asFilterOrNull(row.explicit_filter),
+      energy: asPlanEnergy(asText(row.energy)),
+      wishNote: asText(row.wish_note),
+      mood: asText(row.mood),
+      djBrief: asText(row.dj_brief),
+      talkPoints: asText(row.talk_points),
+      stationId: row.station_id == null ? null : asNum(row.station_id),
+      stationName: asText(row.station_name),
+      source: asText(row.source) === "o365" ? "o365" : "manual",
+      active: startMs <= now && endMs >= now,
+      past: endMs < now,
+    } satisfies PlanBlock;
+  });
+}
+
+async function bootstrapPlan(sql: Sql, userId: string) {
+  const count = await sql<Row>`select count(*)::int as n from plan_blocks`;
+  if (asNum(count[0]?.n) > 0) return;
+  const blocks: [string, string, number, number, number, number, number | null, boolean | null, string, string, string, string, string][] = [
+    [
+      "Ankommen",
+      "musik",
+      8, 0, 9, 0,
+      22, true, "leise",
+      "Leise im Foyer. Gespräche bleiben verständlich.",
+      "ruhig, ohne Gesang im Vordergrund",
+      "Musik unter den Gesprächen halten. Nicht lauter drehen, auch wenn es leer wirkt. Keine Durchsage, solange Leute ankommen.",
+      "Lautstärke nicht anheben\nKeine Wünsche nach vorne ziehen",
+    ],
+    [
+      "Morgenrunde",
+      "meeting",
+      9, 0, 9, 20,
+      18, false, "leise",
+      "Während der Runde fast aus. Keine Wünsche.",
+      "Stille",
+      "Nur ein sehr leiser Teppich, oder ganz aus, sobald jemand spricht. Nach dem Ende wieder auf Bürolautstärke, nicht abrupt.",
+      "Wünsche geschlossen lassen\nMikrofon griffbereit, falls die Moderation vorgezogen wird\nDanach Büro-Lautstärke 36",
+    ],
+    [
+      "Arbeitsmusik",
+      "musik",
+      9, 20, 12, 0,
+      36, true, "mittel",
+      "Büro: Hintergrund, nicht im Vordergrund.",
+      "gleichmäßig, wenig Dynamiksprünge",
+      "Hausplaylist und ruhige Wünsche. Explicit bleibt aus, auch wenn der Filter gerade lockerer wäre. Keine langen Relais, außer der Plan sagt es.",
+      "Wünsche mitlaufen lassen\nLaute Titel zurückstellen\nGegen 11:50 die Mittagspause ansagen, wenn ein Slot da ist",
+    ],
+    [
+      "Mittag",
+      "pause",
+      12, 0, 13, 0,
+      50, true, "hoch",
+      "Deutlich, noch kein Club. Wünsche dürfen nach vorne.",
+      "hell, etwas lauter",
+      "Die Pause darf die Musik hören. Trotzdem keine Clubspitzen. Wenn der Raum voll ist und geredet wird, einen Schritt zurück auf 44.",
+      "Wünsche bevorzugen\nBei voller Küche auf 44 gehen\nKurz nach 13 Uhr wieder auf Büro",
+    ],
+    [
+      "Nachmittag",
+      "musik",
+      13, 0, 16, 0,
+      36, true, "mittel",
+      "Wieder Hintergrund. Lautstärke-Wunsch aus dem Vormittag gilt nicht mehr.",
+      "warm",
+      "Gleiche Linie wie der Vormittag. Um 16 Uhr endet der Block, danach Feierabend leiser. Eine Ansage nur, wenn die Regie einen Text freigegeben hat.",
+      "Keine zweite laute Phase\nAnsage nur aus freigegebenem Text",
+    ],
+    [
+      "Feierabend",
+      "musik",
+      16, 0, 18, 30,
+      30, true, "leise",
+      "Leise ausklingen. Nicht mehr aufdrehen.",
+      "warm, kürzer",
+      "Zum Schluss einmal verabschieden, dann die Musik unter dem Gehen lassen. Keine neuen lauten Wünsche nach vorne ziehen.",
+      "Einmal verabschieden\nLaute Wünsche liegen lassen\nSender nur, wenn ein Fenster im Plan steht",
+    ],
+  ];
+  for (const block of blocks) {
+    const [title, kind, sh, sm, eh, em, volume, wishes, energy, wishNote, mood, djBrief, talkPoints] = block;
+    await sql`
+      insert into plan_blocks (
+        title, kind, starts_at, ends_at, volume, wishes_enabled, energy, wish_note, mood, dj_brief, talk_points,
+        source, external_id, created_by
+      ) values (
+        ${title}, ${kind}, ${atClock(sh as number, sm as number)}, ${atClock(eh as number, em as number)},
+        ${volume}, ${wishes}, ${energy}, ${wishNote}, ${mood}, ${djBrief}, ${talkPoints},
+        'manual', ${`seed:${title}`}, ${userId}
+      )
+    `;
+  }
+}
+
+function atClock(hour: number, minute: number): string {
+  const date = new Date();
+  date.setHours(hour, minute, 0, 0);
+  return date.toISOString();
+}
+
+function parsePlan(input: unknown): PlanInput {
+  if (!input || typeof input !== "object") fail("Block unvollständig.");
+  const o = input as Record<string, unknown>;
+  const title = clip(o.title, 80);
+  const startsAt = asIso(o.startsAt);
+  const endsAt = asIso(o.endsAt);
+  if (title.length < 2) fail("Der Block braucht einen Namen.");
+  if (!startsAt || !endsAt) fail("Beginn und Ende fehlen.");
+  if (new Date(endsAt).getTime() <= new Date(startsAt).getTime()) fail("Das Ende liegt vor dem Beginn.");
+  const stationId = o.stationId == null || o.stationId === "" || o.stationId === 0 ? null : asNum(o.stationId);
+  return {
+    id: o.id == null ? undefined : asNum(o.id),
+    title,
+    kind: asPlanKind(asText(o.kind)),
+    startsAt,
+    endsAt,
+    volume: o.volume == null || o.volume === "" ? null : clampVolume(asNum(o.volume)),
+    wishesEnabled: o.wishesEnabled == null ? null : o.wishesEnabled === true,
+    explicitFilter: asFilterOrNull(o.explicitFilter),
+    energy: asPlanEnergy(asText(o.energy)),
+    wishNote: clip(o.wishNote, 240),
+    mood: clip(o.mood, 120),
+    djBrief: clip(o.djBrief, 1200),
+    talkPoints: clip(o.talkPoints, 600),
+    stationId,
+  };
+}
+
+async function upsertExternalPlan(
+  sql: Sql,
+  userId: string,
+  item: { externalId: string; title: string; startsAt: string; endsAt: string; body: string },
+) {
+  const wish = wishFromText(`${item.title}\n${item.body}`);
+  const kind = /meeting|besprechung|call|jour|standup|townhall/i.test(item.title) ? "meeting" : "event";
+  const existing = await sql<Row>`select id from plan_blocks where external_id = ${item.externalId} and source = 'o365' limit 1`;
+  if (existing[0]) {
+    await sql`
+      update plan_blocks set
+        title = ${item.title},
+        kind = ${kind},
+        starts_at = ${item.startsAt},
+        ends_at = ${item.endsAt},
+        volume = ${wish.volume},
+        wishes_enabled = ${wish.wishesEnabled},
+        wish_note = ${wish.wishNote || "Aus Outlook. Lautstärke unverändert, wenn der Text nichts sagt."},
+        dj_brief = ${clip(item.body, 1200) || "Termin aus Outlook. Lautstärke-Wunsch steht oben, sonst den Normalwert lassen."},
+        talk_points = ${"Termin kommt aus dem Kalender\nMusik darunter halten, nicht darüber"}
+      where id = ${asNum(existing[0].id)}
+    `;
+    return;
+  }
+  await sql`
+    insert into plan_blocks (
+      title, kind, starts_at, ends_at, volume, wishes_enabled, energy, wish_note, mood, dj_brief, talk_points,
+      source, external_id, created_by
+    ) values (
+      ${item.title}, ${kind}, ${item.startsAt}, ${item.endsAt}, ${wish.volume}, ${wish.wishesEnabled},
+      ${wish.volume != null && wish.volume <= 24 ? "leise" : "mittel"},
+      ${wish.wishNote || "Aus Outlook. Lautstärke unverändert, wenn der Text nichts sagt."},
+      'Kalender',
+      ${clip(item.body, 1200) || "Termin aus Outlook. Nichts dazuerfinden, nur den Lautstärke-Wunsch aus dem Text."},
+      ${"Nicht über den Termin sprechen, außer der Text gibt es her\nLautstärke-Wunsch einhalten"},
+      'o365', ${item.externalId}, ${userId}
+    )
+  `;
+}
+
+function serviceId(value: unknown): ServiceId {
+  if (value === "spotify" || value === "youtube" || value === "o365" || value === "piper") return value;
+  fail("Unbekannter Dienst.");
+}
+
+export const saveService = createServerFn({ method: "POST" })
+  .validator((input: {
+    id?: string;
+    enabled?: boolean;
+    clientId?: string;
+    tenant?: string;
+    mailbox?: string;
+    voice?: string;
+    endpoint?: string;
+    secret?: string;
+  }) => {
+    const id = serviceId(input?.id);
+    return {
+      id,
+      enabled: input?.enabled === true,
+      clientId: clip(input?.clientId, 80),
+      tenant: clip(input?.tenant, 80),
+      mailbox: clip(input?.mailbox, 120),
+      voice: piperVoice(asText(input?.voice)).id,
+      endpoint: clip(input?.endpoint, 200),
+      secret: asText(input?.secret).trim().slice(0, 200),
+    };
+  })
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    return withRadioLock(async () => {
+      const sql = await getSql();
+      await requireAdmin(sql, context.userId);
+      const current = await loadServices(sql);
+      if (data.id === "spotify") {
+        const secret = data.secret || current.spotify.secret;
+        await sql`
+          update service_links set
+            enabled = ${data.enabled},
+            config = ${JSON.stringify({ clientId: data.clientId.replace(/[^\w-]/g, "") })},
+            secret = ${secret},
+            updated_at = now()
+          where id = 'spotify'
+        `;
+      } else if (data.id === "youtube") {
+        const secret = data.secret || current.youtube.key;
+        await sql`
+          update service_links set enabled = ${data.enabled}, secret = ${secret}, updated_at = now() where id = 'youtube'
+        `;
+      } else if (data.id === "o365") {
+        const secret = data.secret || current.o365.secret;
+        const mailbox = data.mailbox.includes("@") ? data.mailbox : "";
+        await sql`
+          update service_links set
+            enabled = ${data.enabled},
+            config = ${JSON.stringify({
+              tenant: data.tenant.replace(/[^\w.-]/g, ""),
+              clientId: data.clientId.replace(/[^\w-]/g, ""),
+              mailbox,
+            })},
+            secret = ${secret},
+            updated_at = now()
+          where id = 'o365'
+        `;
+      } else {
+        const endpoint = data.endpoint ? piperEndpoint(data.endpoint) : "";
+        if (data.endpoint.trim() && !endpoint) fail("Die Piper-Adresse muss http oder https sein.");
+        await sql`
+          update service_links set
+            enabled = ${data.enabled},
+            config = ${JSON.stringify({ voice: data.voice, endpoint })},
+            updated_at = now()
+          where id = 'piper'
+        `;
+      }
+      return loadAdmin(sql, context.userId);
+    });
+  });
+
+export const testService = createServerFn({ method: "POST" })
+  .validator((input: { id?: string }) => ({ id: serviceId(input?.id) }))
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    await requireAdmin(sql, context.userId);
+    const links = await loadServices(sql);
+    let detail = "";
+    try {
+      if (data.id === "spotify") {
+        if (!links.spotify.clientId || !links.spotify.secret) fail("Client-ID und Geheimnis fehlen.");
+        await spotifyToken(links.spotify.clientId, links.spotify.secret);
+        detail = "Spotify nimmt die Zugangsdaten an.";
+      } else if (data.id === "youtube") {
+        const hits = await searchYoutube("Khruangbin", links.youtube.key);
+        detail = hits[0] ? `YouTube antwortet. Zum Beispiel „${hits[0].title}“.` : "YouTube antwortet ohne Treffer.";
+      } else if (data.id === "o365") {
+        if (!links.o365.tenant || !links.o365.clientId || !links.o365.secret) fail("Mandant, Client-ID oder Geheimnis fehlt.");
+        await graphToken(links.o365.tenant, links.o365.clientId, links.o365.secret);
+        detail = links.o365.mailbox
+          ? "Microsoft 365 nimmt die App an. Kalender holen liest das Postfach."
+          : "Token da. Für den Kalender noch das Postfach eintragen.";
+      } else if (links.piper.endpoint) {
+        await fetchPiper(links.piper.endpoint, "Test.", links.piper.voice);
+        detail = `Piper unter ${links.piper.endpoint} liefert Ton. Stimme ${piperVoice(links.piper.voice).name}.`;
+      } else {
+        detail = `${piperVoice(links.piper.voice).name} spricht im Browser. Ohne Piper-Adresse bleibt es dabei.`;
+      }
+    } catch (error) {
+      detail = error instanceof Error ? error.message : "Prüfung fehlgeschlagen.";
+      await sql`update service_links set detail = ${detail}, updated_at = now() where id = ${data.id}`;
+      return { ok: false as const, detail, snapshot: await loadAdmin(sql, context.userId) };
+    }
+    await sql`update service_links set detail = ${detail}, updated_at = now() where id = ${data.id}`;
+    return { ok: true as const, detail, snapshot: await loadAdmin(sql, context.userId) };
+  });
+
+export const importOutlook = createServerFn({ method: "POST" })
+  .validator((input: { ics?: string }) => ({ ics: asText(input?.ics).slice(0, 80_000) }))
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    return withRadioLock(async () => {
+      const sql = await getSql();
+      await requireAdmin(sql, context.userId);
+      let imported = 0;
+      if (data.ics.trim()) {
+        const events = parseIcs(data.ics);
+        if (events.length === 0) fail("In dem ICS war kein Termin.");
+        for (const event of events) {
+          await upsertExternalPlan(sql, context.userId, {
+            externalId: `ics:${event.uid}`,
+            title: event.title,
+            startsAt: event.startsAt,
+            endsAt: event.endsAt,
+            body: event.description,
+          });
+          imported += 1;
+        }
+      } else {
+        const links = await loadServices(sql);
+        const events = await graphEvents({
+          tenant: links.o365.tenant,
+          clientId: links.o365.clientId,
+          secret: links.o365.secret,
+          mailbox: links.o365.mailbox,
+        });
+        for (const event of events) {
+          await upsertExternalPlan(sql, context.userId, {
+            externalId: `graph:${event.id}`,
+            title: event.title,
+            startsAt: event.startsAt,
+            endsAt: event.endsAt,
+            body: event.body,
+          });
+          imported += 1;
+        }
+        if (imported === 0) fail("Der Kalender hat in den nächsten zwei Tagen nichts.");
+      }
+      await sql`
+        update service_links set detail = ${`${imported} Termine im Musikplan.`}, updated_at = now() where id = 'o365'
+      `;
+      return { imported, snapshot: await loadAdmin(sql, context.userId) };
+    });
+  });
+
+export const savePlan = createServerFn({ method: "POST" })
+  .validator((input: unknown) => parsePlan(input))
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    return withRadioLock(async () => {
+      const sql = await getSql();
+      await requireAdmin(sql, context.userId);
+      if (data.stationId) {
+        const found = await sql<Row>`select id from relay_stations where id = ${data.stationId}`;
+        if (!found[0]) fail("Diesen Sender gibt es nicht.");
+      }
+      if (data.id) {
+        const updated = await sql`
+          update plan_blocks set
+            title = ${data.title},
+            kind = ${data.kind},
+            starts_at = ${data.startsAt},
+            ends_at = ${data.endsAt},
+            volume = ${data.volume},
+            wishes_enabled = ${data.wishesEnabled},
+            explicit_filter = ${data.explicitFilter},
+            energy = ${data.energy},
+            wish_note = ${data.wishNote},
+            mood = ${data.mood},
+            dj_brief = ${data.djBrief},
+            talk_points = ${data.talkPoints},
+            station_id = ${data.stationId}
+          where id = ${data.id}
+          returning id
+        `;
+        if (!updated[0]) fail("Block nicht gefunden.");
+      } else {
+        await sql`
+          insert into plan_blocks (
+            title, kind, starts_at, ends_at, volume, wishes_enabled, explicit_filter, energy,
+            wish_note, mood, dj_brief, talk_points, station_id, source, external_id, created_by
+          ) values (
+            ${data.title}, ${data.kind}, ${data.startsAt}, ${data.endsAt}, ${data.volume}, ${data.wishesEnabled},
+            ${data.explicitFilter}, ${data.energy}, ${data.wishNote}, ${data.mood}, ${data.djBrief}, ${data.talkPoints},
+            ${data.stationId}, 'manual', '', ${context.userId}
+          )
+        `;
+      }
+      return loadAdmin(sql, context.userId);
+    });
+  });
+
+export const deletePlan = createServerFn({ method: "POST" })
+  .validator((input: { id?: number }) => {
+    const id = asNum(input?.id);
+    if (!id) fail("Block fehlt.");
+    return { id };
+  })
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    return withRadioLock(async () => {
+      const sql = await getSql();
+      await requireAdmin(sql, context.userId);
+      await sql`delete from plan_blocks where id = ${data.id}`;
+      return loadAdmin(sql, context.userId);
+    });
+  });
+
+export const createMember = createServerFn({ method: "POST" })
+  .validator((input: { name?: string; email?: string; password?: string; role?: string }) => {
+    const name = clip(input?.name, 80);
+    const email = asText(input?.email).trim().toLowerCase();
+    const password = asText(input?.password);
+    if (name.length < 2) fail("Der Name ist zu kurz.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 120) fail("E-Mail ungültig.");
+    if (password.length < 8 || password.length > 80) fail("Passwort mindestens 8 Zeichen.");
+    if (input?.role !== "admin" && input?.role !== "dj" && input?.role !== "listener") fail("Rolle ungültig.");
+    return { name, email, password, role: input.role };
+  })
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    return withRadioLock(async () => {
+      const sql = await getSql();
+      await requireAdmin(sql, context.userId);
+      const existing = await sql<Row>`select "id" from "user" where lower("email") = ${data.email} limit 1`;
+      if (existing[0]) fail("Diese E-Mail gibt es schon.");
+      const { hashPassword } = await import("better-auth/crypto");
+      const hash = await hashPassword(data.password);
+      const id = crypto.randomUUID();
+      const accountId = crypto.randomUUID();
+      await sql`
+        insert into "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt")
+        values (${id}, ${data.name}, ${data.email}, true, now(), now())
+      `;
+      await sql`
+        insert into "account" ("id", "accountId", "providerId", "userId", "password", "createdAt", "updatedAt")
+        values (${accountId}, ${id}, 'credential', ${id}, ${hash}, now(), now())
+      `;
+      await sql`
+        insert into members (user_id, display_name, role)
+        values (${id}, ${data.name}, ${data.role})
+        on conflict (user_id) do update set display_name = excluded.display_name, role = excluded.role
+      `;
+      return loadAdmin(sql, context.userId);
+    });
+  });
+
+export const updateMember = createServerFn({ method: "POST" })
+  .validator((input: { userId?: string; name?: string; role?: string; disabled?: boolean; password?: string }) => {
+    const userId = clip(input?.userId, 80);
+    if (!userId) fail("Person fehlt.");
+    const password = asText(input?.password);
+    if (password && (password.length < 8 || password.length > 80)) fail("Passwort mindestens 8 Zeichen.");
+    if (input?.role != null && input.role !== "admin" && input.role !== "dj" && input.role !== "listener") {
+      fail("Rolle ungültig.");
+    }
+    return {
+      userId,
+      name: input?.name == null ? null : clip(input.name, 80),
+      role: input?.role == null ? null : input.role,
+      disabled: input?.disabled == null ? null : input.disabled === true,
+      password,
+    };
+  })
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    return withRadioLock(async () => {
+      const sql = await getSql();
+      await requireAdmin(sql, context.userId);
+      const rows = await sql<Row>`select role from members where user_id = ${data.userId}`;
+      if (!rows[0]) fail("Person nicht gefunden.");
+      const wasAdmin = asText(rows[0].role) === "admin";
+      const losesAdmin = wasAdmin && data.role != null && data.role !== "admin";
+      const locksOut = data.disabled === true && (wasAdmin || data.userId === context.userId);
+      if ((losesAdmin || locksOut) && data.userId === context.userId) {
+        fail("Die eigene Regie bleibt an. Eine andere Regie kann das ändern.");
+      }
+      if (losesAdmin || (data.disabled === true && wasAdmin)) {
+        const admins = await sql<Row>`select count(*)::int as n from members where role = 'admin' and disabled = false`;
+        if (asNum(admins[0]?.n) <= 1) fail("Die letzte aktive Regie bleibt.");
+      }
+      if (data.name && data.name.length >= 2) {
+        await sql`update members set display_name = ${data.name} where user_id = ${data.userId}`;
+        await sql`update "user" set "name" = ${data.name}, "updatedAt" = now() where "id" = ${data.userId}`;
+      }
+      if (data.role) await sql`update members set role = ${data.role} where user_id = ${data.userId}`;
+      if (data.disabled != null) {
+        await sql`update members set disabled = ${data.disabled} where user_id = ${data.userId}`;
+        if (data.disabled) await sql`delete from "session" where "userId" = ${data.userId}`;
+      }
+      if (data.password) {
+        const { hashPassword } = await import("better-auth/crypto");
+        const hash = await hashPassword(data.password);
+        const accounts = await sql<Row>`
+          select "id" from "account" where "userId" = ${data.userId} and "providerId" = 'credential' limit 1
+        `;
+        if (accounts[0]) {
+          await sql`
+            update "account" set "password" = ${hash}, "updatedAt" = now()
+            where "id" = ${asText(accounts[0].id)}
+          `;
+        } else {
+          await sql`
+            insert into "account" ("id", "accountId", "providerId", "userId", "password", "createdAt", "updatedAt")
+            values (${crypto.randomUUID()}, ${data.userId}, 'credential', ${data.userId}, ${hash}, now(), now())
+          `;
+        }
+      }
+      return loadAdmin(sql, context.userId);
+    });
+  });
+
+export const deleteMember = createServerFn({ method: "POST" })
+  .validator((input: { userId?: string }) => {
+    const userId = clip(input?.userId, 80);
+    if (!userId) fail("Person fehlt.");
+    return { userId };
+  })
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    return withRadioLock(async () => {
+      const sql = await getSql();
+      await requireAdmin(sql, context.userId);
+      if (data.userId === context.userId) fail("Das eigene Konto löscht eine andere Regie.");
+      const rows = await sql<Row>`select role from members where user_id = ${data.userId}`;
+      if (!rows[0]) fail("Person nicht gefunden.");
+      if (asText(rows[0].role) === "admin") {
+        const admins = await sql<Row>`select count(*)::int as n from members where role = 'admin' and disabled = false`;
+        if (asNum(admins[0]?.n) <= 1) fail("Die letzte Regie bleibt.");
+      }
+      await sql`delete from members where user_id = ${data.userId}`;
+      await sql`delete from "user" where "id" = ${data.userId}`;
+      return loadAdmin(sql, context.userId);
+    });
+  });
+
+export const airPiper = createServerFn({ method: "POST" })
+  .validator((input: { title?: string; text?: string }) => {
+    const text = clip(input?.text, 500);
+    const title = clip(input?.title, 80) || "Durchsage";
+    if (text.length < 8) fail("Der Text ist zu kurz.");
+    if (title.length < 2) fail("Die Ansage braucht einen Namen.");
+    return { title, text };
+  })
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    return withRadioLock(async () => {
+      const sql = await getSql();
+      const desk = await requireDesk(sql, context.userId);
+      const links = await loadServices(sql);
+      if (!links.piper.enabled) fail("Piper ist ausgeschaltet.");
+      const voice = links.piper.voice;
+      let recordingId: number | null = null;
+      if (links.piper.endpoint) {
+        const audio = await fetchPiper(links.piper.endpoint, data.text, voice);
+        if (audio && (audio.mime === "audio/wav" || audio.mime === "audio/mpeg" || audio.mime === "audio/webm" || audio.mime === "audio/ogg")) {
+          const inserted = await sql<Row>`
+            insert into recordings (title, mime, audio_base64, duration_ms, created_by, created_by_name)
+            values (${`Piper · ${data.title}`}, ${audio.mime}, ${audio.audioBase64}, ${speechDurationMs(data.text)}, ${context.userId}, ${desk.name})
+            returning id
+          `;
+          recordingId = asNum(inserted[0]?.id) || null;
+        }
+      }
+      await sql`
+        insert into announcements (kind, title, body, status, air_at, created_by, created_by_name, recording_id, voice)
+        values (
+          'piper', ${data.title}, ${data.text}, 'queued', null, ${context.userId}, ${desk.name}, ${recordingId}, ${voice}
+        )
+      `;
+      await advancePlayback(sql, { interrupt: true });
+      return { ok: true as const, voice, name: piperVoice(voice).name };
+    });
+  });
+
 

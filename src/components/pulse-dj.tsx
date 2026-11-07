@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { UserButton } from "@/lib/auth/gates";
 import {
   addExternal,
+  airPiper,
   deleteRecording,
   getClip,
   getDesk,
@@ -13,6 +14,8 @@ import {
   startRelayNow,
 } from "@/lib/pulse/api";
 import type { DeskSnapshot } from "@/lib/pulse/types";
+import { piperLine, speakPiper } from "@/lib/pulse/voice";
+import { DjRundown } from "@/components/pulse-plan";
 import { Button, Field, Panel, TopBar, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
 import { GuideButton, GuidePanel } from "@/components/pulse-guide";
 
@@ -63,6 +66,8 @@ export function Desk() {
         {data ? (
           <>
             <GuidePanel role={data.me.role === "admin" ? "admin" : "dj"} />
+            <DjRundown blocks={data.plan} />
+            <Piper data={data} onSaved={setData} />
             <Mic onSaved={setData} />
             <Recordings data={data} onSaved={setData} />
             <RelayNow data={data} onSaved={setData} />
@@ -71,6 +76,56 @@ export function Desk() {
         ) : null}
       </main>
     </div>
+  );
+}
+
+function Piper({ data, onSaved }: { data: DeskSnapshot; onSaved: (next: DeskSnapshot) => void }) {
+  const [title, setTitle] = useState("Durchsage");
+  const [text, setText] = useState("");
+  const [pending, setPending] = useState(false);
+  return (
+    <Panel title={`Piper · ${data.piperName}`}>
+      <p className="mb-3 text-sm text-muted">
+        Weibliche Stimme. «Hören» spricht nur hier. «Auf Sendung» unterbricht die Musik für alle.
+      </p>
+      <form
+        className="grid gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setPending(true);
+          void airPiper({ data: { title, text } })
+            .then(async () => {
+              onSaved(await getDesk());
+              toast.success(`${data.piperName} ist auf Sendung.`);
+            })
+            .catch((caught) => toast.error(errorText(caught)))
+            .finally(() => setPending(false));
+        }}
+      >
+        <Field label="Name">
+          <input className={fieldClass} value={title} onChange={(event) => setTitle(event.target.value)} />
+        </Field>
+        <Field label="Text">
+          <textarea
+            className="min-h-24 w-full rounded-md border border-line bg-surface-2 px-3 py-2 text-sm outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+          />
+        </Field>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="line"
+            onClick={() => speakPiper(text.trim().length >= 8 ? text : piperLine(data.piperVoice), data.piperVoice)}
+          >
+            Hören
+          </Button>
+          <Button type="submit" disabled={pending || text.trim().length < 8}>
+            Auf Sendung
+          </Button>
+        </div>
+      </form>
+    </Panel>
   );
 }
 

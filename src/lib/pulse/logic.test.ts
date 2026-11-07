@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { WISH_GRACE_MS, wishesToPrune, type PruneCandidate } from "./logic.ts";
+import { WISH_GRACE_MS, parseIcs, wishFromText, wishesToPrune, type PruneCandidate } from "./logic.ts";
 
 const now = 1_000_000;
 
@@ -47,4 +47,25 @@ test("manuell räumt sofort auf, auch frische Wünsche", () => {
     now,
   );
   assert.deepEqual(ids, [1]);
+});
+
+test("Outlook-Text setzt leise und keine Wünsche", () => {
+  const wish = wishFromText("Jour fixe. Bitte leise. Keine Wünsche.");
+  assert.equal(wish.volume, 24);
+  assert.equal(wish.wishesEnabled, false);
+});
+
+test("ICS liefert Beginn, Ende und Titel", () => {
+  const events = parseIcs(`BEGIN:VCALENDAR
+BEGIN:VEVENT
+DTSTART:20261107T090000Z
+DTEND:20261107T093000Z
+SUMMARY:Townhall
+DESCRIPTION:etwas lauter
+UID:townhall
+END:VEVENT
+END:VCALENDAR`);
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.title, "Townhall");
+  assert.equal(events[0]?.startsAt, "2026-11-07T09:00:00.000Z");
 });

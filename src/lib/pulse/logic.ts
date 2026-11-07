@@ -186,3 +186,114 @@ export function wishesToPrune(
     })
     .map((item) => item.id);
 }
+
+export type PiperVoiceId = "de_DE-kerstin-low" | "de_DE-eva_k-x_low";
+
+/** Nur weibliche Piper-Stimmen. Kerstin ist die Sendestimme. */
+export const PIPER_VOICES: { id: PiperVoiceId; name: string; detail: string }[] = [
+  { id: "de_DE-kerstin-low", name: "Kerstin", detail: "weiblich, Deutsch, ruhig" },
+  { id: "de_DE-eva_k-x_low", name: "Eva", detail: "weiblich, Deutsch, heller" },
+];
+
+export function piperVoice(id: string): { id: PiperVoiceId; name: string; detail: string } {
+  return PIPER_VOICES.find((voice) => voice.id === id) ?? PIPER_VOICES[0]!;
+}
+
+/** Lautstärke-Wünsche, die die Regie einem Block geben kann. */
+export const VOLUME_WISHES = [
+  { id: "foyer", label: "Foyer", volume: 22, note: "Gespräche bleiben verständlich." },
+  { id: "buero", label: "Büro", volume: 36, note: "Hintergrund, nicht im Vordergrund." },
+  { id: "pause", label: "Pause", volume: 50, note: "Deutlich, noch kein Club." },
+  { id: "event", label: "Event", volume: 64, note: "Der Raum darf die Musik hören." },
+] as const;
+
+export type PlanKind = "musik" | "pause" | "meeting" | "ansage" | "relais" | "event";
+export type PlanEnergy = "leise" | "mittel" | "hoch";
+
+export function asPlanKind(value: string): PlanKind {
+  if (value === "pause" || value === "meeting" || value === "ansage" || value === "relais" || value === "event") {
+    return value;
+  }
+  return "musik";
+}
+
+export function asPlanEnergy(value: string): PlanEnergy {
+  if (value === "leise" || value === "hoch") return value;
+  return "mittel";
+}
+
+export type IcsEvent = {
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  description: string;
+  uid: string;
+};
+
+/** Outlook-Export (.ics). Faltungen, lokale Zeiten und UTC. Höchstens 40 Termine. */
+export function parseIcs(raw: string): IcsEvent[] {
+  const text = raw.replace(/\r\n/g, "\n").replace(/\n[ \t]/g, "");
+  const blocks = text.split("BEGIN:VEVENT").slice(1);
+  const out: IcsEvent[] = [];
+  for (const block of blocks) {
+    const body = block.split("END:VEVENT")[0] ?? "";
+    const fields = new Map<string, string>();
+    for (const line of body.split("\n")) {
+      const idx = line.indexOf(":");
+      if (idx < 1) continue;
+      const key = line.slice(0, idx).split(";")[0]?.trim().toUpperCase() ?? "";
+      if (!key || fields.has(key)) continue;
+      fields.set(key, line.slice(idx + 1).trim());
+    }
+    const title = unescapeIcs(fields.get("SUMMARY") ?? "").slice(0, 80);
+    const starts = icsDate(fields.get("DTSTART") ?? "");
+    const ends = icsDate(fields.get("DTEND") ?? "") ?? (starts ? new Date(starts.getTime() + 30 * 60_000) : null);
+    if (title.length < 2 || !starts || !ends || ends.getTime() <= starts.getTime()) continue;
+    const uid = unescapeIcs(fields.get("UID") ?? "") || `${starts.toISOString()}|${title}`;
+    out.push({
+      title,
+      startsAt: starts.toISOString(),
+      endsAt: ends.toISOString(),
+      description: unescapeIcs(fields.get("DESCRIPTION") ?? "").slice(0, 500),
+      uid: uid.slice(0, 180),
+    });
+  }
+  return out.slice(0, 40);
+}
+
+function unescapeIcs(value: string): string {
+  return value.replace(/\\n/gi, "\n").replace(/\\,/g, ",").replace(/\\;/g, ";").trim();
+}
+
+function icsDate(value: string): Date | null {
+  const v = value.trim();
+  if (!v) return null;
+  const match = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?)?(Z)?$/.exec(v);
+  if (!match) {
+    const parsed = new Date(v);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  const hour = Number(match[4] ?? "0");
+  const minute = Number(match[5] ?? "0");
+  const second = Number(match[6] ?? "0");
+  if (match[7]) return new Date(Date.UTC(year, month, day, hour, minute, second));
+  return new Date(year, month, day, hour, minute, second);
+}
+
+/**
+ * Freitext aus Outlook oder der Regie wird zu Lautstärke und Wunscherlaubnis.
+ * Ohne Hinweis bleibt beides unverändert (null).
+ */
+export function wishFromText(text: string): { volume: number | null; wishesEnabled: boolean | null; wishNote: string } {
+  const hay = text.toLowerCase();
+  let volume: number | null = null;
+  let wishesEnabled: boolean | null = null;
+  if (/leise|flüster|fluester|hintergrund|meeting|besprechung|call|jour fixe/.test(hay)) volume = 24;
+  if (/laut|party|feier|event|mittag/.test(hay)) volume = 58;
+  if (/keine wünsche|wuensche aus|wünsche aus|wunschfrei/.test(hay)) wishesEnabled = false;
+  if (/wünsche an|wuensche an|wunschbox/.test(hay)) wishesEnabled = true;
+  return { volume, wishesEnabled, wishNote: text.trim().slice(0, 240) };
+}

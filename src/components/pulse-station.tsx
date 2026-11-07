@@ -17,6 +17,7 @@ import {
 import type { QueueItem, StationSnapshot, TrackInput } from "@/lib/pulse/types";
 import { Button, Eq, Panel, TopBar, clockLabel, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
 import { GuideButton, GuidePanel } from "@/components/pulse-guide";
+import { speakPiper } from "@/lib/pulse/voice";
 import { cue } from "@/lib/pulse/cues";
 import { cn } from "@/lib/utils";
 
@@ -368,7 +369,9 @@ function VoteButton({
 
 function Search({ snap, onAdded }: { snap: StationSnapshot; onAdded: (snap: StationSnapshot) => void }) {
   const [query, setQuery] = useState("");
-  const [catalog, setCatalog] = useState<"preview" | "archive">(snap.musicSource === "preview" ? "preview" : "archive");
+  const [catalog, setCatalog] = useState<"preview" | "archive" | "youtube" | "spotify">(
+    snap.musicSource === "youtube" ? "youtube" : snap.musicSource === "spotify" ? "spotify" : snap.musicSource === "archive" ? "archive" : "preview",
+  );
   const [hits, setHits] = useState<TrackInput[]>([]);
   const [pending, setPending] = useState(false);
   const [looked, setLooked] = useState(false);
@@ -392,11 +395,13 @@ function Search({ snap, onAdded }: { snap: StationSnapshot; onAdded: (snap: Stat
       <p className="mb-3 text-sm text-muted">
         {snap.openWishes}/{MAX_OPEN_WISHES} offene Wünsche von dir.
       </p>
-      <div className="mb-3 flex gap-2">
+      <div className="mb-3 flex gap-2 overflow-x-auto">
         {(
           [
             ["preview", "30s Vorschau"],
             ["archive", "Ganze Titel"],
+            ...(snap.youtubeOn ? ([["youtube", "YouTube"]] as const) : []),
+            ...(snap.spotifyOn ? ([["spotify", "Spotify"]] as const) : []),
           ] as const
         ).map(([id, label]) => (
           <button
@@ -404,7 +409,7 @@ function Search({ snap, onAdded }: { snap: StationSnapshot; onAdded: (snap: Stat
             type="button"
             onClick={() => setCatalog(id)}
             className={cn(
-              "h-11 rounded-md px-3 text-sm",
+              "h-11 shrink-0 rounded-md px-3 text-sm",
               catalog === id ? "bg-signal text-signal-ink" : "bg-surface-2 text-muted",
             )}
           >
@@ -416,7 +421,15 @@ function Search({ snap, onAdded }: { snap: StationSnapshot; onAdded: (snap: Stat
         <input
           className={fieldClass}
           value={query}
-          placeholder={catalog === "archive" ? "Titel aus dem Archiv, ohne Abo" : "Song oder Interpret"}
+          placeholder={
+            catalog === "archive"
+              ? "Titel aus dem Archiv, ohne Abo"
+              : catalog === "youtube"
+                ? "Song, Interpret oder YouTube-Link"
+                : catalog === "spotify"
+                  ? "Song oder Interpret auf Spotify"
+                  : "Song oder Interpret"
+          }
           onChange={(event) => setQuery(event.target.value)}
           disabled={closed}
         />
@@ -516,7 +529,9 @@ function useAir(
       await playClip(air.recordingId, audio, setBlocked);
       return;
     }
-    if (air.mode === "announcement" && air.announcementBody && audible && !muted) speak(air.announcementBody);
+    if (air.mode === "announcement" && air.announcementBody && audible && !muted) {
+      speakPiper(air.announcementBody, air.voiceId || "de_DE-kerstin-low");
+    }
     if (!audio || !air.audioUrl || !audible || air.mode === "announcement") return;
     try {
       await audio.play();
@@ -555,7 +570,7 @@ function useAir(
     }
     if (air.mode === "announcement") {
       audio.pause();
-      if (air.announcementBody) speak(air.announcementBody);
+      if (air.announcementBody) speakPiper(air.announcementBody, air.voiceId || "de_DE-kerstin-low");
       return;
     }
     if (!air.audioUrl) {
@@ -602,16 +617,6 @@ async function playClip(
 function clock(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000));
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
-}
-
-function speak(text: string) {
-  if (typeof window === "undefined" || !window.speechSynthesis) return;
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = "de-DE";
-  utter.rate = 1;
-  const voice = window.speechSynthesis.getVoices().find((item) => item.lang.toLowerCase().startsWith("de"));
-  if (voice) utter.voice = voice;
-  window.speechSynthesis.speak(utter);
 }
 
 async function vote(item: QueueItem, value: -1 | 0 | 1, onChange: (snap: StationSnapshot) => void) {

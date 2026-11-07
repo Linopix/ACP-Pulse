@@ -14,6 +14,7 @@ import {
   deleteStation,
   generateModeration,
   getAdmin,
+  airPiper,
   removePlaylistTrack,
   saveRelaySlot,
   saveRule,
@@ -21,24 +22,28 @@ import {
   saveStation,
   searchMusic,
   setFallback,
-  setMemberRole,
   pruneWishes,
 } from "@/lib/pulse/api";
 import type { AdminSnapshot, OutputProbe, PlaylistRecord, SettingsRecord, TrackInput } from "@/lib/pulse/types";
 import { Button, Field, Panel, TopBar, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
 import { GuideButton, GuidePanel } from "@/components/pulse-guide";
+import { MusicPlan } from "@/components/pulse-plan";
+import { ServicesDesk } from "@/components/pulse-services";
+import { UsersDesk } from "@/components/pulse-users";
 import { cn } from "@/lib/utils";
 
-type Section = "ausgabe" | "programm" | "kalender" | "sender" | "playlists" | "moderation" | "team";
+type Section = "ausgabe" | "programm" | "musikplan" | "kalender" | "dienste" | "sender" | "playlists" | "moderation" | "nutzer";
 
 const sections: { id: Section; label: string }[] = [
   { id: "ausgabe", label: "Ausgabe" },
   { id: "programm", label: "Programm" },
+  { id: "musikplan", label: "Musikplan" },
   { id: "kalender", label: "Kalender" },
+  { id: "dienste", label: "Dienste" },
   { id: "sender", label: "Sender" },
   { id: "playlists", label: "Playlists" },
   { id: "moderation", label: "Moderation" },
-  { id: "team", label: "Rollen" },
+  { id: "nutzer", label: "Nutzer" },
 ];
 
 export function AdminDesk() {
@@ -107,11 +112,13 @@ export function AdminDesk() {
                 <OutputForm initial={data.settings} suggested={data.suggestedReceiver} onSaved={setData} />
               ) : null}
               {section === "programm" ? <ProgramForm initial={data.settings} onSaved={setData} /> : null}
+              {section === "musikplan" ? <MusicPlan data={data} onSaved={setData} /> : null}
               {section === "kalender" ? <Calendar data={data} onSaved={setData} /> : null}
+              {section === "dienste" ? <ServicesDesk services={data.services} onSaved={setData} /> : null}
               {section === "sender" ? <Stations data={data} onSaved={setData} /> : null}
               {section === "playlists" ? <Playlists data={data} onSaved={setData} /> : null}
               {section === "moderation" ? <Moderation data={data} onSaved={setData} /> : null}
-              {section === "team" ? <Team data={data} onSaved={setData} /> : null}
+              {section === "nutzer" ? <UsersDesk data={data} onSaved={setData} /> : null}
             </div>
           </>
         ) : null}
@@ -353,24 +360,23 @@ function ProgramForm({ initial, onSaved }: { initial: SettingsRecord; onSaved: (
               setForm({
                 ...form,
                 musicSource:
-                  event.target.value === "spotify" ? "spotify" : event.target.value === "archive" ? "archive" : "preview",
+                  event.target.value === "spotify"
+                    ? "spotify"
+                    : event.target.value === "archive"
+                      ? "archive"
+                      : event.target.value === "youtube"
+                        ? "youtube"
+                        : "preview",
               })
             }
           >
             <option value="preview">Vorschau-Katalog, 30 Sekunden</option>
             <option value="archive">Internet Archive, ganze Titel, ohne Abo</option>
-            <option value="spotify">Spotify, Anbindung vorbereitet</option>
+            <option value="spotify">Spotify</option>
+            <option value="youtube">YouTube</option>
           </select>
         </Field>
-        {form.musicSource === "spotify" ? (
-          <Field label="Spotify Client-ID" hint="Ohne Verbindung bleibt die Suche aus.">
-            <input
-              className={fieldClass}
-              value={form.spotifyClientId}
-              onChange={(event) => setForm({ ...form, spotifyClientId: event.target.value })}
-            />
-          </Field>
-        ) : null}
+        <p className="text-sm text-subtle">Spotify, YouTube, Microsoft 365 und Piper verbindest du unter Dienste.</p>
         <div className="flex flex-wrap gap-2">
           <Button type="submit" disabled={pending}>
             Speichern
@@ -720,6 +726,20 @@ function Moderation({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: Ad
             >
               Skript erzeugen
             </Button>
+            <Button
+              variant="line"
+              disabled={script.trim().length < 8}
+              onClick={() => {
+                void airPiper({ data: { title: "Moderation", text: script } })
+                  .then(async () => {
+                    onSaved(await getAdmin());
+                    toast.success("Piper ist auf Sendung.");
+                  })
+                  .catch((caught) => toast.error(errorText(caught)));
+              }}
+            >
+              Mit Piper sprechen
+            </Button>
           </div>
           {script ? <p className="text-sm text-ink">{script}</p> : null}
         </div>
@@ -882,48 +902,6 @@ function Stations({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: Admi
       </Panel>
     </div>
   );
-}
-
-function Team({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: AdminSnapshot) => void }) {
-  return (
-    <Panel title="Rollen">
-      <p className="mb-4 text-sm text-muted">
-        Hörer wünschen und stimmen ab. DJ hat das Pult: Mikrofon, Aufnahmen, Sender jetzt übernehmen. Regie stellt
-        Programm, Kalender und Rollen.
-      </p>
-      <ul className="grid min-w-0 grid-cols-1 gap-3">
-        {data.members.map((member) => (
-          <li key={member.userId} className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
-            <div>
-              <p className="font-medium">{member.displayName}</p>
-              <p className="text-sm text-muted">{member.email || roleLabel(member.role)}</p>
-            </div>
-            <select
-              className={cn(fieldClass, "w-36")}
-              value={member.role}
-              onChange={(event) => {
-                const role = event.target.value;
-                if (role !== "admin" && role !== "dj" && role !== "listener") return;
-                void setMemberRole({ data: { userId: member.userId, role } })
-                  .then(onSaved)
-                  .catch((caught) => toast.error(errorText(caught)));
-              }}
-            >
-              <option value="listener">Hörer</option>
-              <option value="dj">DJ</option>
-              <option value="admin">Regie</option>
-            </select>
-          </li>
-        ))}
-      </ul>
-    </Panel>
-  );
-}
-
-function roleLabel(role: string): string {
-  if (role === "admin") return "Regie";
-  if (role === "dj") return "DJ";
-  return "Hörer";
 }
 
 function localInput(plusMinutes: number): string {
