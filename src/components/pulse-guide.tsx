@@ -57,10 +57,14 @@ function stepsFor(role: DeskRole) {
   if (role === "dj" || role === "admin") {
     steps.push({
       title: "Pult",
-      body: "Mikrofon, Piper und Aufnahmen unterbrechen die Musik. Der Laufplan sagt Lautstärke, Wünsche und was du sagst. YouTube bleibt in den Browsern.",
+      body: "Oben dieselbe Leiste: 01 Sendung, 02 Pult, 03 Regie. Im Pult springst du zu Laufplan, Stimme, Mikrofon, Aufnahmen, Sender und Kennung. Mikrofon und Piper unterbrechen die Musik.",
     });
   }
   if (role === "admin") {
+    steps.push({
+      title: "Die Regie",
+      body: "Das Brett hat vier Felder: Ton, Tag, Quellen, Haus. Kanal 01 bis 09, dieselbe Schrift wie die Leiste oben.",
+    });
     steps.push({
       title: "Wohin der Ton geht",
       body: "Browser spielt hier. Sonos und Boxen spielen über den Receiver. «Verbindung prüfen» sagt, ob die Befehle ankommen. Ohne Sonos-Gerät antwortet der Testlautsprecher im Receiver.",
@@ -76,7 +80,7 @@ function stepsFor(role: DeskRole) {
 export function GuideButton() {
   const show = useGuide((state) => state.show);
   return (
-    <button type="button" onClick={show} className="inline-flex h-11 items-center rounded-md px-3 text-sm text-ink">
+    <button type="button" onClick={show} className="inline-flex h-11 items-center rounded-md px-2 text-sm text-muted sm:px-3">
       Führung
     </button>
   );

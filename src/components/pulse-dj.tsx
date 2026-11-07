@@ -1,8 +1,6 @@
 /** Pult: Mikrofon, gespeicherte Aufnahmen, Sender sofort, fremde Audiodatei. */
 import { useEffect, useRef, useState } from "react";
-import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { UserButton } from "@/lib/auth/gates";
 import {
   addExternal,
   airPiper,
@@ -16,8 +14,9 @@ import {
 import type { DeskSnapshot } from "@/lib/pulse/types";
 import { piperLine, speakPiper } from "@/lib/pulse/voice";
 import { DjRundown } from "@/components/pulse-plan";
-import { Button, Field, Panel, TopBar, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
-import { GuideButton, GuidePanel } from "@/components/pulse-guide";
+import { Button, Field, Panel, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
+import { GuidePanel } from "@/components/pulse-guide";
+import { CueRail, CueTarget, StudioChrome } from "@/components/pulse-nav";
 
 export function Desk() {
   const [data, setData] = useState<DeskSnapshot | null>(null);
@@ -37,24 +36,13 @@ export function Desk() {
   }, []);
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col pb-safe">
-      <TopBar>
-        <Link to="/" className="inline-flex h-11 items-center rounded-md px-3 text-sm text-ink">
-          Sendung
-        </Link>
-        {data?.me.role === "admin" ? (
-          <Link to="/admin" className="inline-flex h-11 items-center rounded-md px-3 text-sm text-ink">
-            Regie
-          </Link>
-        ) : null}
-        <GuideButton />
-        <UserButton />
-      </TopBar>
-      <main className="grid w-full min-w-0 grid-cols-1 gap-4 px-4 pb-10 sm:px-6">
-        <div className="grid gap-2">
+    <div className="flex min-h-screen w-full flex-col pb-safe">
+      <StudioChrome room="pult" role={data?.me.role ?? "dj"} />
+      <main className="mx-auto grid w-full min-w-0 max-w-5xl grid-cols-1 gap-4 px-4 py-6 pb-10 sm:px-6">
+        <div className="grid gap-3">
           <h1 className="font-display text-4xl tracking-tight">Pult</h1>
           <p className="max-w-2xl text-sm text-muted">
-            Mikrofon und Aufnahmen unterbrechen die Musik. Sender können sofort oder nach Plan übernehmen.
+            Mikrofon, Piper und Aufnahmen unterbrechen die Musik. Die Nummern springen ans passende Feld.
           </p>
         </div>
         {!data && !error ? <p className="text-muted">Pult wird geladen.</p> : null}
@@ -66,12 +54,25 @@ export function Desk() {
         {data ? (
           <>
             <GuidePanel role={data.me.role === "admin" ? "admin" : "dj"} />
-            <DjRundown blocks={data.plan} />
-            <Piper data={data} onSaved={setData} />
-            <Mic onSaved={setData} />
-            <Recordings data={data} onSaved={setData} />
-            <RelayNow data={data} onSaved={setData} />
-            <Cue />
+            <CueRail />
+            <CueTarget id="laufplan">
+              <DjRundown blocks={data.plan} />
+            </CueTarget>
+            <CueTarget id="stimme">
+              <Piper data={data} onSaved={setData} />
+            </CueTarget>
+            <CueTarget id="mikro">
+              <Mic onSaved={setData} />
+            </CueTarget>
+            <CueTarget id="band">
+              <Recordings data={data} onSaved={setData} />
+            </CueTarget>
+            <CueTarget id="sender">
+              <RelayNow data={data} onSaved={setData} />
+            </CueTarget>
+            <CueTarget id="kennung">
+              <Cue />
+            </CueTarget>
           </>
         ) : null}
       </main>

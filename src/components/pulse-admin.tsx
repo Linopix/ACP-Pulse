@@ -1,8 +1,6 @@
 /** Regie. Jeder Abschnitt schreibt über eine eigene Serverfunktion, die Oberfläche hält kein Programm selbst. */
 import { useEffect, useState } from "react";
-import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { UserButton } from "@/lib/auth/gates";
 import type { FilterMode } from "@/lib/pulse/logic";
 import {
   addPlaylistTrack,
@@ -25,26 +23,15 @@ import {
   pruneWishes,
 } from "@/lib/pulse/api";
 import type { AdminSnapshot, OutputProbe, PlaylistRecord, SettingsRecord, TrackInput } from "@/lib/pulse/types";
-import { Button, Field, Panel, TopBar, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
-import { GuideButton, GuidePanel } from "@/components/pulse-guide";
+import { Button, Field, Panel, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
+import { GuidePanel } from "@/components/pulse-guide";
+import { RegieBoard, StudioChrome, type RegieSection } from "@/components/pulse-nav";
 import { MusicPlan } from "@/components/pulse-plan";
 import { ServicesDesk } from "@/components/pulse-services";
 import { UsersDesk } from "@/components/pulse-users";
 import { cn } from "@/lib/utils";
 
-type Section = "ausgabe" | "programm" | "musikplan" | "kalender" | "dienste" | "sender" | "playlists" | "moderation" | "nutzer";
-
-const sections: { id: Section; label: string }[] = [
-  { id: "ausgabe", label: "Ausgabe" },
-  { id: "programm", label: "Programm" },
-  { id: "musikplan", label: "Musikplan" },
-  { id: "kalender", label: "Kalender" },
-  { id: "dienste", label: "Dienste" },
-  { id: "sender", label: "Sender" },
-  { id: "playlists", label: "Playlists" },
-  { id: "moderation", label: "Moderation" },
-  { id: "nutzer", label: "Nutzer" },
-];
+type Section = RegieSection;
 
 export function AdminDesk() {
   const [data, setData] = useState<AdminSnapshot | null>(null);
@@ -65,24 +52,12 @@ export function AdminDesk() {
   }, []);
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col pb-safe">
-      <TopBar>
-        <Link to="/" className="inline-flex h-11 items-center rounded-md px-3 text-sm text-ink">
-          Sendung
-        </Link>
-        <Link to="/dj" className="inline-flex h-11 items-center rounded-md px-3 text-sm text-ink">
-          Pult
-        </Link>
-        <GuideButton />
-        <UserButton />
-      </TopBar>
-      <main className="grid w-full min-w-0 grid-cols-1 gap-4 px-4 pb-10 sm:px-6">
-        <div className="grid gap-2">
-          <h1 className="font-display text-4xl tracking-tight">Regie</h1>
-          <p className="max-w-2xl text-sm text-muted">
-            Lautstärke, Filter und Wünsche gelten für alle. Ein Zeitfenster überschreibt sie nur solange es läuft.
-          </p>
-        </div>
+    <div className="flex min-h-screen w-full flex-col pb-safe">
+      <StudioChrome room="regie" role="admin" />
+      <main className="mx-auto grid w-full min-w-0 max-w-5xl grid-cols-1 gap-4 px-4 py-6 pb-10 sm:px-6">
+        <p className="max-w-2xl text-sm text-muted">
+          Ton, Tag, Quellen und Haus. Ein Zeitfenster überschreibt Lautstärke und Wünsche nur, solange es läuft.
+        </p>
         {!data && !error ? <p className="text-muted">Regie wird geladen.</p> : null}
         {error && !data ? (
           <Panel title="Kein Zugang">
@@ -92,21 +67,7 @@ export function AdminDesk() {
         {data ? (
           <>
             <GuidePanel role="admin" />
-            <div className="flex gap-2 overflow-x-auto">
-              {sections.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setSection(item.id)}
-                  className={cn(
-                    "nav-pill h-11 shrink-0 rounded-md px-4 text-sm",
-                    section === item.id ? "bg-signal text-signal-ink" : "bg-surface text-muted",
-                  )}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
+            <RegieBoard section={section} onChange={setSection} />
             <div key={section} className="rise">
               {section === "ausgabe" ? (
                 <OutputForm initial={data.settings} suggested={data.suggestedReceiver} onSaved={setData} />

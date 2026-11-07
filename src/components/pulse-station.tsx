@@ -1,8 +1,6 @@
 /** Sendung: jetzt, Queue, Suche, Stimmen. Daten kommen aus getStation. */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { UserButton } from "@/lib/auth/gates";
 import { MAX_OPEN_WISHES, isDesk, type FilterMode } from "@/lib/pulse/logic";
 import {
   addWish,
@@ -15,8 +13,9 @@ import {
   withdrawWish,
 } from "@/lib/pulse/api";
 import type { QueueItem, StationSnapshot, TrackInput } from "@/lib/pulse/types";
-import { Button, Eq, Panel, TopBar, clockLabel, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
-import { GuideButton, GuidePanel } from "@/components/pulse-guide";
+import { Button, Eq, Panel, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
+import { GuidePanel } from "@/components/pulse-guide";
+import { StudioChrome } from "@/components/pulse-nav";
 import { speakPiper } from "@/lib/pulse/voice";
 import { cue } from "@/lib/pulse/cues";
 import { cn } from "@/lib/utils";
@@ -49,23 +48,9 @@ export function Station() {
   }, [refresh]);
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col pb-safe">
-      <TopBar>
-        <span className="hidden text-sm tabular-nums text-muted sm:inline">{clockLabel(now)}</span>
-        {snap && isDesk(snap.me.role) ? (
-          <Link to="/dj" className="inline-flex h-11 items-center rounded-md px-3 text-sm font-medium text-ink">
-            Pult
-          </Link>
-        ) : null}
-        {snap?.me.role === "admin" ? (
-          <Link to="/admin" className="inline-flex h-11 items-center rounded-md px-3 text-sm font-medium text-ink">
-            Regie
-          </Link>
-        ) : null}
-        <GuideButton />
-        <UserButton />
-      </TopBar>
-      <main className="grid w-full min-w-0 grid-cols-1 gap-4 px-4 pb-8 sm:px-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+    <div className="flex min-h-screen w-full flex-col pb-safe">
+      <StudioChrome room="sendung" role={snap?.me.role ?? null} wide />
+      <main className="mx-auto grid w-full min-w-0 max-w-6xl grid-cols-1 gap-4 px-4 py-6 pb-8 sm:px-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         {!snap && !failed ? <p className="text-muted">Sendung wird geladen.</p> : null}
         {failed && !snap ? (
           <Panel title="Keine Verbindung">

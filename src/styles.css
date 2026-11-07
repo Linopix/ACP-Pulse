@@ -131,7 +131,7 @@
   transform: scale(0.94);
 }
 
-.nav-pill {
+.studio-nav {
   transition:
     background-color 160ms ease,
     color 160ms ease;
@@ -150,7 +150,7 @@
 
   .progress-fill,
   .vote,
-  .nav-pill {
+  .studio-nav {
     transition: none;
   }
 }
