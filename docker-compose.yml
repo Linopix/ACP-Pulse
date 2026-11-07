@@ -18,10 +18,13 @@ services:
       HOST: 0.0.0.0
       PORT: "8080"
       PULSE_RECEIVER_URL: http://receiver:8090
+      PGLITE_DATA_DIR: /data/pglite
       # Öffentliche Adresse, nur wenn der Proxy mitläuft. Leer lassen für localhost.
       PULSE_PUBLIC_HOST: ${PULSE_PUBLIC_HOST:-}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
+    volumes:
+      - pulse-data:/data
     depends_on:
       - receiver
 
@@ -42,5 +45,6 @@ services:
       - receiver
 
 volumes:
+  pulse-data:
   caddy-data:
   caddy-config:

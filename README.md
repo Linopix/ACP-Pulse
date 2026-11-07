@@ -125,7 +125,7 @@ Docker, gleiche Aufteilung:
 docker compose up --build
 ```
 
-Sendung unter <http://localhost:8080>, Receiver unter <http://localhost:8090>. Der Container startet den Dev-Server. Das ist die Testversion, kein Produktionsimage.
+Sendung unter <http://localhost:8080>, Receiver unter <http://localhost:8090>. Der Container startet den Dev-Server. Das ist die Testversion, kein Produktionsimage. Konten, Wünsche und die Sendung liegen im Volume `pulse-data` und bleiben nach einem Neustart des Containers. `docker compose down -v` löscht das Volume und damit die Konten.
 
 `localhost` ist nur der direkte Weg ohne Zertifikat. Die Anmeldung vertraut von Haus aus nur dieser Adresse, und das Sitzungs-Cookie ist `Secure`: ein Browser legt es auf einer normalen HTTP-Adresse außer localhost nicht ab. Eine eigene Adresse braucht deshalb HTTPS.
 

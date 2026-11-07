@@ -48,6 +48,7 @@ const globalRef = globalThis as typeof globalThis & {
   __pgSqlPromise__?: Promise<Sql>;
   __pgliteInstance__?: Promise<import("@electric-sql/pglite").PGlite>;
   __pgliteMigrateChain__?: Promise<void>;
+  __pgliteShutdown__?: boolean;
 };
 
 /**
@@ -107,12 +108,13 @@ function createNeonSql(): Promise<Sql> {
 
 async function createPgliteSql(): Promise<Sql> {
   // Embedded Postgres, imported on demand so it never loads on the Neon path.
-  // One in-memory instance per process, shared across HMR module instances, so
-  // data survives source edits (it resets on dev-server restart).
-  // New files under migrations/ apply when this module reloads.
+  // One instance per process, shared across HMR. Without PGLITE_DATA_DIR it
+  // lives in memory and a process restart clears it. With that directory
+  // (the Docker volume) accounts and the sendung survive a container restart.
   globalRef.__pgliteInstance__ ??= (async () => {
     const { PGlite } = await import("@electric-sql/pglite");
-    const pg = new PGlite({
+    const dataDir = process.env.PGLITE_DATA_DIR?.trim() || "memory://";
+    const pg = new PGlite(dataDir, {
       parsers: {
         [OID_INT8]: Number,
         [OID_DATE]: identity,
@@ -128,6 +130,14 @@ async function createPgliteSql(): Promise<Sql> {
     globalRef.__pgliteInstance__ = undefined;
     throw err;
   });
+  if (!globalRef.__pgliteShutdown__) {
+    globalRef.__pgliteShutdown__ = true;
+    const closeDb = () => {
+      void globalRef.__pgliteInstance__?.then((pg) => pg.close()).catch(() => undefined);
+    };
+    process.once("SIGTERM", closeDb);
+    process.once("SIGINT", closeDb);
+  }
   const pg = await globalRef.__pgliteInstance__;
 
   // Apply migrations/ (the single schema source) so the preview matches production.

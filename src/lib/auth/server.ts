@@ -34,6 +34,8 @@ import { bearer, genericOAuth } from "better-auth/plugins";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { getCookie } from "@tanstack/react-start/server";
 import { randomBytes } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { Pool } from "pg";
 import { ensureDbReady, getPglite } from "../db";
 import { emailAndPasswordEnabled } from "./email-password";
@@ -53,14 +55,39 @@ void ensureDbReady();
 /**
  * Preview secret must outlive module reloads: PGLite (and its session rows) is
  * stored on `globalThis`, so an HMR re-eval of this file must NOT mint a new
- * signing secret or every existing session becomes invalid mid-dev. Process
- * restart clears both the secret and PGLite together.
+ * signing secret or every existing session becomes invalid mid-dev. When the
+ * database is on disk, the secret sits beside that directory so a container
+ * restart keeps the same sessions.
  */
 const globalAuthRef = globalThis as typeof globalThis & {
   __grokAuthPreviewSecret__?: string;
 };
 function previewAuthSecret(): string {
-  globalAuthRef.__grokAuthPreviewSecret__ ??= randomBytes(32).toString("hex");
+  if (globalAuthRef.__grokAuthPreviewSecret__) return globalAuthRef.__grokAuthPreviewSecret__;
+  const fromEnv = process.env.BETTER_AUTH_SECRET?.trim();
+  if (fromEnv) {
+    globalAuthRef.__grokAuthPreviewSecret__ = fromEnv;
+    return fromEnv;
+  }
+  const dataDir = process.env.PGLITE_DATA_DIR?.trim();
+  if (dataDir && dataDir !== "memory://") {
+    const file = `${dataDir}.auth-secret`;
+    try {
+      const existing = readFileSync(file, "utf8").trim();
+      if (existing) {
+        globalAuthRef.__grokAuthPreviewSecret__ = existing;
+        return existing;
+      }
+    } catch {
+      // First start: the file is created below.
+    }
+    const secret = randomBytes(32).toString("hex");
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, secret, { mode: 0o600 });
+    globalAuthRef.__grokAuthPreviewSecret__ = secret;
+    return secret;
+  }
+  globalAuthRef.__grokAuthPreviewSecret__ = randomBytes(32).toString("hex");
   return globalAuthRef.__grokAuthPreviewSecret__;
 }
 
