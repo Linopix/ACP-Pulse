@@ -1,0 +1,103 @@
+@import "tailwindcss";
+
+/*
+  Farben kommen aus src/brand.ts (Corporate Identity).
+  Hier nur die Verdrahtung auf Tailwind — keine zweiten Hexwerte.
+*/
+@theme inline {
+  --color-canvas: var(--brand-canvas);
+  --color-surface: var(--brand-surface);
+  --color-surface-2: var(--brand-surface-2);
+  --color-ink: var(--brand-ink);
+  --color-muted: var(--brand-muted);
+  --color-subtle: var(--brand-subtle);
+  --color-line: var(--brand-line);
+  --color-signal: var(--brand-signal);
+  --color-signal-ink: var(--brand-signal-ink);
+  --color-danger: var(--brand-danger);
+  --color-ok: var(--brand-ok);
+  --font-sans: var(--brand-font-sans);
+  --font-display: var(--brand-font-display);
+  --radius-sm: var(--brand-radius-sm);
+  --radius-md: var(--brand-radius-md);
+  --radius-lg: var(--brand-radius-lg);
+  --radius-xl: var(--brand-radius-xl);
+}
+
+:root {
+  color-scheme: dark;
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--brand-canvas);
+    color: var(--brand-ink);
+    font-family: var(--brand-font-sans);
+    font-size: 1rem;
+    line-height: 1.5;
+    text-wrap: pretty;
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-display {
+    font-family: var(--brand-font-display);
+    text-wrap: balance;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--brand-signal) 45%, transparent);
+    color: var(--brand-ink);
+  }
+}
+
+@keyframes pulse-bar {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.eq-bar {
+  transform-origin: bottom;
+  animation: pulse-bar 900ms cubic-bezier(0.23, 1, 0.32, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eq-bar {
+    animation: none;
+    transform: scaleY(0.7);
+  }
+}
+
+.pb-safe {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+input[type="range"] {
+  accent-color: var(--brand-signal);
+  height: 2.75rem;
+}

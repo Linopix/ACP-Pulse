@@ -1,0 +1,1 @@
+import{a as e,s as t}from"./index-BHua5DbD.js";import{g as n,i as r,n as i,r as a,t as o}from"./pulse-landing-DqRYSmqw.js";var s=t();function c(){let{user:t,isPending:c}=n();return!r()||c?(0,s.jsx)(a,{children:(0,s.jsx)(i,{})}):t?(0,s.jsx)(e,{to:`/`}):(0,s.jsx)(a,{children:(0,s.jsx)(o,{})})}export{c as component};
