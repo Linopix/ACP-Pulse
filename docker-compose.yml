@@ -18,5 +18,29 @@ services:
       HOST: 0.0.0.0
       PORT: "8080"
       PULSE_RECEIVER_URL: http://receiver:8090
+      # Öffentliche Adresse, nur wenn der Proxy mitläuft. Leer lassen für localhost.
+      PULSE_PUBLIC_HOST: ${PULSE_PUBLIC_HOST:-}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
     depends_on:
       - receiver
+
+  # Optional: docker compose --profile proxy up --build
+  # Ports 80 und 443 müssen frei sein. Namen stehen in deploy/Caddyfile.
+  caddy:
+    image: caddy:2
+    profiles: ["proxy"]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - pulse
+      - receiver
+
+volumes:
+  caddy-data:
+  caddy-config:

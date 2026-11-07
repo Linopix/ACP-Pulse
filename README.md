@@ -127,6 +127,35 @@ docker compose up --build
 
 Sendung unter <http://localhost:8080>, Receiver unter <http://localhost:8090>. Der Container startet den Dev-Server. Das ist die Testversion, kein Produktionsimage.
 
+`localhost` ist nur der direkte Weg ohne Zertifikat. Die Anmeldung vertraut von Haus aus nur dieser Adresse, und das Sitzungs-Cookie ist `Secure`: ein Browser legt es auf einer normalen HTTP-Adresse außer localhost nicht ab. Eine eigene Adresse braucht deshalb HTTPS.
+
+## Eigene Adresse
+
+Pi-hole, zwei A-Einträge auf die IP des Docker-Rechners:
+
+- `acpulse.mycloud.ag` — Hörerseite, Pult, Regie
+- `rec.acpulse.mycloud.ag` — Status des Receivers
+
+Die Hörer rufen den Receiver nicht auf. Die Sendung spricht ihn intern unter `http://receiver:8090` an. Ein Pfad wie `/receive` auf derselben Domain wäre ein zweites Routing vor den bestehenden Pfaden der Sendung. Die Subdomain lässt beides in Ruhe.
+
+Neben `docker-compose.yml` eine Datei `.env`, die nicht ins Repo gehört:
+
+```bash
+PULSE_PUBLIC_HOST=acpulse.mycloud.ag
+BETTER_AUTH_URL=https://acpulse.mycloud.ag
+BETTER_AUTH_SECRET=eine-lange-zufaellige-zeichenkette
+```
+
+Dann:
+
+```bash
+docker compose --profile proxy up --build
+```
+
+[`deploy/Caddyfile`](deploy/Caddyfile) macht TLS und leitet weiter. `tls internal` ist das Zertifikat fürs eigene Netz. Let's Encrypt steht als Alternative in derselben Datei, geht aber nur, wenn der Name öffentlich auflöst und Port 80 aus dem Internet ankommt. Pi-hole darf den Namen im LAN danach trotzdem auf die interne IP zeigen.
+
+Ohne die drei Variablen lehnt die Anmeldung die fremde Adresse ab. Die Oberfläche sagt dann, dass die Anmeldung von dieser Adresse nicht erlaubt ist.
+
 [`deploy/k8s.yaml`](deploy/k8s.yaml) ist dieselbe Form für später: ein Pod Sendung, ein Pod Receiver, Service-Name `pulse-receiver`. Sonos im Büro erreicht ein entfernter Cluster nicht. Der Receiver muss im selben Netz stehen wie der Lautsprecher.
 
 ```bash

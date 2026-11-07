@@ -1,0 +1,20 @@
+# Hörerseite und Receiver hinter TLS.
+# Pi-hole zeigt beide Namen auf die IP dieses Rechners.
+#
+# tls internal: Zertifikat von Caddy, nur im eigenen Netz gültig.
+# Die Warnung im Browser verschwindet, wenn das Root-Zertifikat aus
+# dem Volume caddy-data (pki/authorities/local/root.crt) auf den Geräten liegt.
+#
+# Let's Encrypt statt dessen: die zwei Zeilen "tls internal" löschen.
+# Dafür muss mycloud.ag öffentlich auflösen und Port 80 aus dem Internet
+# erreichbar sein. Pi-hole kann den Namen im LAN trotzdem auf die interne IP zeigen.
+
+acpulse.mycloud.ag {
+	tls internal
+	reverse_proxy pulse:8080
+}
+
+rec.acpulse.mycloud.ag {
+	tls internal
+	reverse_proxy receiver:8090
+}

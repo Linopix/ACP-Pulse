@@ -145,11 +145,21 @@ function authPopupPlugin(): Plugin {
 // `0.0.0.0:8080` is the live-preview contract — don't change host/port.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
+// Hinter einem Reverse Proxy den öffentlichen Host setzen, sonst blockt Vite
+// die fremde Host-Zeile. Beispiel: PULSE_PUBLIC_HOST=acpulse.mycloud.ag
+const publicHost = process.env.PULSE_PUBLIC_HOST?.trim();
+
 export default defineConfig(({ command, isPreview }) => ({
   server: {
     host: "0.0.0.0",
     port: 8080,
     strictPort: true,
+    ...(publicHost
+      ? {
+          allowedHosts: [publicHost, "localhost", "127.0.0.1"],
+          hmr: { host: publicHost, protocol: "wss" as const, clientPort: 443 },
+        }
+      : {}),
   },
   preview: {
     host: "127.0.0.1",

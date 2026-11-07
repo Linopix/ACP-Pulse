@@ -169,8 +169,8 @@ export function AuthCard() {
 function localAuthError(message: string): string {
   const text = message.toLowerCase();
   if (text.includes("exist") || text.includes("already")) return "Zu dieser Adresse gibt es schon ein Konto.";
+  if (text.includes("origin")) return "Anmeldung von dieser Adresse ist nicht erlaubt.";
   if (text.includes("password")) return "Das Passwort muss mindestens 8 Zeichen haben.";
   if (text.includes("invalid") || text.includes("credential")) return "E-Mail oder Passwort passt nicht.";
-  if (text.includes("origin")) return "Anmeldung von dieser Adresse ist nicht erlaubt.";
   return message || "Anmeldung fehlgeschlagen.";
 }
