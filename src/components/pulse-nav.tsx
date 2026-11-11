@@ -35,7 +35,7 @@ export function StudioChrome({
   const open = rooms.filter((item) => item.id === room || roomOpen(item.id, role));
 
   return (
-    <header className="sticky top-0 z-30 border-b border-line bg-canvas">
+    <header className="sticky top-0 z-30 border-b border-line bg-canvas/95 backdrop-blur-md">
       <div className={cn("mx-auto w-full px-4 sm:px-6", wide ? "max-w-6xl" : "max-w-5xl")}>
         <div className="flex h-14 items-center justify-between gap-3">
           <Link to="/" className="flex min-w-0 items-center gap-2 text-ink">
@@ -59,7 +59,7 @@ export function StudioChrome({
                   aria-current={active ? "page" : undefined}
                   className={cn(
                     "studio-nav flex min-h-11 min-w-0 flex-1 flex-col justify-end sm:flex-none sm:px-1",
-                    active ? "text-ink" : "text-muted",
+                    active ? "text-ink" : "text-muted hover:text-ink",
                   )}
                 >
                   <span className="flex items-baseline gap-2 px-1 pb-2">
@@ -171,7 +171,7 @@ export function RegieBoard({
       <div className="hidden overflow-hidden rounded-xl border border-line bg-line sm:grid sm:grid-cols-4 sm:gap-px">
         {regieGroups.map((item) => (
           <div key={item.id} className="bg-surface px-2 py-3">
-            <p className="px-2 pb-1 text-xs tracking-widest text-subtle uppercase">{item.label}</p>
+            <p className="px-2 pb-1 text-xs font-medium text-subtle">{item.label}</p>
             <ul className="grid">
               {item.items.map((entry) => (
                 <li key={entry.id}>
@@ -262,7 +262,7 @@ export function CueRail() {
             }}
             className={cn(
               "studio-nav flex h-11 items-center gap-2 rounded-md px-2 text-sm",
-              active ? "bg-surface-2 text-ink" : "text-muted",
+              active ? "bg-surface-2 text-ink" : "text-muted hover:bg-canvas hover:text-ink",
             )}
           >
             <span className={cn("font-display text-sm tabular-nums", active ? "text-signal" : "text-subtle")}>

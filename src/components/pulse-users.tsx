@@ -4,8 +4,7 @@ import { toast } from "sonner";
 import { createMember, deleteMember, updateMember } from "@/lib/pulse/api";
 import type { DeskRole } from "@/lib/pulse/logic";
 import type { AdminSnapshot, MemberRecord } from "@/lib/pulse/types";
-import { Button, Field, Panel, errorText, fieldClass } from "@/components/pulse-ui";
-import { cn } from "@/lib/utils";
+import { Button, Field, Panel, Segment, errorText, fieldClass } from "@/components/pulse-ui";
 
 export function UsersDesk({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: AdminSnapshot) => void }) {
   const [name, setName] = useState("");
@@ -60,7 +59,7 @@ export function UsersDesk({ data, onSaved }: { data: AdminSnapshot; onSaved: (ne
         </form>
       </Panel>
       <Panel title="Team">
-        <ul className="grid gap-4">
+        <ul className="grid gap-3">
           {data.members.map((member) => (
             <UserRow key={member.userId} member={member} onSaved={onSaved} />
           ))}
@@ -74,8 +73,8 @@ function UserRow({ member, onSaved }: { member: MemberRecord; onSaved: (next: Ad
   const [name, setName] = useState(member.displayName);
   const [password, setPassword] = useState("");
   return (
-    <li className="grid gap-3 border-t border-line pt-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <li className="grid gap-3 rounded-lg bg-surface-2 p-3">
+      <div className="grid gap-3">
         <div className="min-w-0">
           <p className="font-medium">
             {member.displayName}
@@ -150,17 +149,15 @@ function UserRow({ member, onSaved }: { member: MemberRecord; onSaved: (next: Ad
 
 function RoleSelect({ value, onChange }: { value: string; onChange: (role: DeskRole) => void }) {
   return (
-    <select
-      className={cn(fieldClass, "w-full sm:w-40")}
-      value={value}
-      onChange={(event) => {
-        const role = event.target.value;
-        if (role === "admin" || role === "dj" || role === "listener") onChange(role);
-      }}
-    >
-      <option value="listener">Hörer</option>
-      <option value="dj">DJ</option>
-      <option value="admin">Regie</option>
-    </select>
+    <Segment
+      label="Rolle"
+      value={value === "admin" || value === "dj" || value === "listener" ? value : "listener"}
+      onChange={onChange}
+      options={[
+        { id: "listener", label: "Hörer" },
+        { id: "dj", label: "DJ" },
+        { id: "admin", label: "Regie" },
+      ]}
+    />
   );
 }

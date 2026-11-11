@@ -24,7 +24,7 @@ import {
   pruneWishes,
 } from "@/lib/pulse/api";
 import type { AdminSnapshot, OutputProbe, PlaylistRecord, SettingsRecord, TrackInput } from "@/lib/pulse/types";
-import { Button, Field, Panel, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
+import { Button, Field, Panel, Segment, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
 import { GuidePanel } from "@/components/pulse-guide";
 import { RegieBoard, StudioChrome, type RegieSection } from "@/components/pulse-nav";
 import { MusicPlan } from "@/components/pulse-plan";
@@ -53,9 +53,9 @@ export function AdminDesk() {
   }, []);
 
   return (
-    <div className="flex min-h-screen w-full flex-col pb-safe">
+    <div className="flex min-h-screen w-full flex-col">
       <StudioChrome room="regie" role="admin" />
-      <main className="mx-auto grid w-full min-w-0 max-w-5xl grid-cols-1 gap-4 px-4 py-6 pb-10 sm:px-6">
+      <main className="pb-chrome mx-auto grid w-full min-w-0 max-w-5xl grid-cols-1 gap-4 px-4 py-6 sm:px-6">
         <p className="max-w-2xl text-sm text-muted">
           Ton, Tag, Quellen und Haus. Ein Zeitfenster überschreibt Lautstärke und Wünsche nur, solange es läuft.
         </p>
@@ -118,27 +118,16 @@ function OutputForm({
   return (
     <Panel title="Wohin der Ton geht">
       <div className="grid gap-4">
-        <div className="grid gap-2 sm:grid-cols-3">
-          {(
-            [
-              ["browser", "Dieser Browser"],
-              ["sonos", "Sonos"],
-              ["receiver", "Receiver"],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setForm({ ...form, outputTarget: id })}
-              className={cn(
-                "h-11 rounded-md border border-line px-3 text-sm",
-                form.outputTarget === id ? "bg-signal text-signal-ink" : "bg-surface-2 text-ink",
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <Segment
+          label="Ausgabe"
+          value={form.outputTarget}
+          onChange={(outputTarget) => setForm({ ...form, outputTarget })}
+          options={[
+            { id: "browser", label: "Dieser Browser" },
+            { id: "sonos", label: "Sonos" },
+            { id: "receiver", label: "Receiver" },
+          ]}
+        />
         <p className="text-sm text-muted">Browser spielt hier. Sonos und Boxen über den Receiver.</p>
         {external ? (
           <div className="grid gap-3">

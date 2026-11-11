@@ -228,8 +228,8 @@ function DayStrip({ blocks }: { blocks: PlanBlock[] }) {
   const start = dayStart();
   const span = 14 * 60 * 60 * 1000;
   return (
-    <div className="overflow-x-auto">
-      <div className="relative h-20 min-w-[40rem] rounded-md bg-canvas">
+    <div className="min-w-0 overflow-hidden rounded-md">
+      <div className="relative h-20 w-full rounded-md bg-canvas">
         {blocks.map((block) => {
           const left = Math.max(0, Math.min(1, (new Date(block.startsAt).getTime() - start) / span));
           const right = Math.max(left, Math.min(1, (new Date(block.endsAt).getTime() - start) / span));

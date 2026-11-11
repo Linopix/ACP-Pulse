@@ -51,11 +51,11 @@ export function Button({
     <button
       type={type}
       className={cn(
-        "inline-flex h-11 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium transition-transform duration-150 ease-out active:scale-95 disabled:cursor-not-allowed disabled:opacity-40",
-        variant === "primary" && "bg-signal text-signal-ink",
-        variant === "line" && "border border-line bg-surface text-ink",
-        variant === "ghost" && "bg-transparent text-ink",
-        variant === "danger" && "border border-line text-danger",
+        "inline-flex h-11 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium transition duration-150 ease-out active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100",
+        variant === "primary" && "bg-signal text-signal-ink hover:brightness-110",
+        variant === "line" && "border border-line bg-surface text-ink hover:border-signal hover:bg-surface-2",
+        variant === "ghost" && "bg-transparent text-muted hover:bg-surface-2 hover:text-ink",
+        variant === "danger" && "border border-line text-danger hover:border-danger hover:bg-surface-2",
         className,
       )}
       {...props}
@@ -99,7 +99,7 @@ export function Panel({
     <section className={cn("rise min-w-0 rounded-xl border border-line bg-surface p-4 sm:p-6", className)}>
       {title ? (
         <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="font-display text-2xl leading-none tracking-tight text-ink">{title}</h2>
+          <h2 className="font-display text-xl leading-none tracking-tight text-ink">{title}</h2>
           {action}
         </div>
       ) : null}
@@ -128,6 +128,55 @@ export function clockLabel(now: number): string {
 export function errorText(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   return "Das hat nicht geklappt.";
+}
+
+export function ArtThumb({ url, title }: { url?: string; title: string }) {
+  if (url) {
+    return <img src={url} alt="" className="h-12 w-12 shrink-0 rounded-md bg-canvas object-cover" />;
+  }
+  const mark = title.trim().charAt(0).toUpperCase() || "·";
+  return (
+    <span
+      aria-hidden="true"
+      className="grid h-12 w-12 shrink-0 place-items-center rounded-md bg-canvas font-display text-lg text-subtle"
+    >
+      {mark}
+    </span>
+  );
+}
+
+export function Segment<T extends string>({
+  value,
+  onChange,
+  options,
+  label,
+}: {
+  value: T;
+  onChange: (value: T) => void;
+  options: readonly { id: T; label: string }[];
+  label: string;
+}) {
+  return (
+    <div role="group" aria-label={label} className="flex flex-wrap gap-1 rounded-lg bg-surface-2 p-1">
+      {options.map((option) => {
+        const active = option.id === value;
+        return (
+          <button
+            key={option.id}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(option.id)}
+            className={cn(
+              "h-11 min-w-28 flex-1 rounded-md px-3 text-sm font-medium transition-colors duration-150",
+              active ? "bg-signal text-signal-ink" : "text-muted hover:text-ink",
+            )}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 export function Eq({ live }: { live: boolean }) {

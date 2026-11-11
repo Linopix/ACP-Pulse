@@ -3,7 +3,7 @@ import { useRouter } from "@tanstack/react-router";
 import { brand } from "@/brand";
 import { GROK_PROVIDERS, authClient, signIn } from "@/lib/auth/client";
 import { emailAndPasswordEnabled } from "@/lib/auth/email-password";
-import { Button, Mark, Panel, fieldClass } from "@/components/pulse-ui";
+import { Button, Field, Mark, Panel, fieldClass } from "@/components/pulse-ui";
 
 const points = [
   { title: "Wünsche", text: "Titel in die gemeinsame Queue legen, solange das Programm es erlaubt." },
@@ -115,35 +115,40 @@ export function AuthCard() {
         {emailAndPasswordEnabled ? (
           <form className="grid gap-3" onSubmit={(event) => void onSubmit(event)}>
             {mode === "up" ? (
+              <Field label="Name">
+                <input
+                  className={fieldClass}
+                  placeholder="Wie dich das Team sieht"
+                  autoComplete="name"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  required
+                  minLength={2}
+                />
+              </Field>
+            ) : null}
+            <Field label="E-Mail">
               <input
                 className={fieldClass}
-                placeholder="Name"
-                autoComplete="name"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
+                type="email"
+                placeholder="name@firma.de"
+                autoComplete="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
                 required
-                minLength={2}
               />
-            ) : null}
-            <input
-              className={fieldClass}
-              type="email"
-              placeholder="E-Mail"
-              autoComplete="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              required
-            />
-            <input
-              className={fieldClass}
-              type="password"
-              placeholder="Passwort, mindestens 8 Zeichen"
-              autoComplete={mode === "up" ? "new-password" : "current-password"}
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-              minLength={8}
-            />
+            </Field>
+            <Field label="Passwort" hint="Mindestens 8 Zeichen.">
+              <input
+                className={fieldClass}
+                type="password"
+                autoComplete={mode === "up" ? "new-password" : "current-password"}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                minLength={8}
+              />
+            </Field>
             {error ? (
               <p className="text-sm text-danger" role="alert">
                 {error}

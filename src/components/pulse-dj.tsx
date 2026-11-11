@@ -46,9 +46,9 @@ export function Desk() {
   const later = data?.plan.filter((block) => !block.active && !block.past) ?? [];
 
   return (
-    <div className="flex min-h-screen w-full flex-col pb-safe">
+    <div className="flex min-h-screen w-full flex-col">
       <StudioChrome room="pult" role={data?.me.role ?? "dj"} />
-      <main className="mx-auto grid w-full min-w-0 max-w-6xl grid-cols-1 gap-4 px-4 py-4 pb-10 sm:px-6">
+      <main className="pb-chrome mx-auto grid w-full min-w-0 max-w-6xl grid-cols-1 gap-4 px-4 py-4 sm:px-6">
         {!data && !error ? <p className="text-muted">Pult wird geladen.</p> : null}
         {error && !data ? (
           <Panel title="Kein Zugang">
@@ -119,8 +119,8 @@ function AirStrip({ data, now }: { data: DeskSnapshot; now: number }) {
         <h1 className="mt-1 line-clamp-2 font-display text-4xl leading-none tracking-tight sm:text-5xl">{air.title}</h1>
         <p className="mt-2 truncate text-muted">{air.subtitle}</p>
       </div>
-      <div className="h-1 overflow-hidden rounded-sm bg-surface-2">
-        <div className="h-full bg-signal" style={{ width: `${Math.round(progress * 100)}%` }} />
+      <div className="air-meter" aria-hidden="true">
+        <span style={{ width: `${Math.round(progress * 100)}%` }} />
       </div>
       <div className="flex items-baseline justify-between gap-3 text-xs text-subtle">
         <span className="shrink-0">{data.outputLabel}</span>

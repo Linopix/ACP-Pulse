@@ -122,7 +122,7 @@ export function UserButton() {
             // Success navigates away; on failure re-enable so it can be retried.
             void signOut().catch(() => setSigningOut(false));
           }}
-          className="inline-flex h-11 cursor-pointer items-center px-2 text-sm text-muted disabled:cursor-wait"
+          className="inline-flex h-11 cursor-pointer items-center rounded-md px-2 text-sm text-muted hover:bg-surface-2 hover:text-ink disabled:cursor-wait"
         >
           {signingOut ? "Moment…" : "Abmelden"}
         </button>

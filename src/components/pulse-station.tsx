@@ -13,7 +13,7 @@ import {
   withdrawWish,
 } from "@/lib/pulse/api";
 import type { QueueItem, StationSnapshot, TrackInput } from "@/lib/pulse/types";
-import { Button, Eq, Panel, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
+import { ArtThumb, Button, Eq, Panel, Segment, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
 import { GuidePanel } from "@/components/pulse-guide";
 import { StudioChrome } from "@/components/pulse-nav";
 import { speakPiper } from "@/lib/pulse/voice";
@@ -48,9 +48,9 @@ export function Station() {
   }, [refresh]);
 
   return (
-    <div className="flex min-h-screen w-full flex-col pb-safe">
+    <div className="flex min-h-screen w-full flex-col">
       <StudioChrome room="sendung" role={snap?.me.role ?? null} wide />
-      <main className="mx-auto grid w-full min-w-0 max-w-6xl grid-cols-1 gap-4 px-4 py-6 pb-8 sm:px-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+      <main className="pb-chrome mx-auto grid w-full min-w-0 max-w-6xl grid-cols-1 items-start gap-4 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         {!snap && !failed ? <p className="text-muted">Sendung wird geladen.</p> : null}
         {failed && !snap ? (
           <Panel title="Keine Verbindung">
@@ -62,10 +62,17 @@ export function Station() {
         ) : null}
         {snap ? (
           <>
-            <div className="grid min-w-0 grid-cols-1 content-start gap-4">
+            <div className="grid min-w-0 grid-cols-1 content-start gap-4 lg:col-start-1">
               <GuidePanel role={snap.me.role} />
               <Banners snap={snap} />
               <NowPlaying snap={snap} now={now} onSkip={() => run(() => skipTrack(), setSnap)} />
+            </div>
+            <div className="grid min-w-0 grid-cols-1 content-start gap-4 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+              <Search snap={snap} onAdded={setSnap} />
+              {isDesk(snap.me.role) ? <Announce onAir={setSnap} /> : null}
+              <p className="px-1 text-xs text-subtle">Ausgabe: {snap.outputLabel}.</p>
+            </div>
+            <div className="grid min-w-0 grid-cols-1 content-start gap-4 lg:col-start-1">
               <Queue snap={snap} onChange={setSnap} />
               {snap.history.length > 0 ? (
                 <Panel title="Zuletzt">
@@ -82,11 +89,6 @@ export function Station() {
                   </ul>
                 </Panel>
               ) : null}
-            </div>
-            <div className="grid min-w-0 grid-cols-1 content-start gap-4">
-              <Search snap={snap} onAdded={setSnap} />
-              {isDesk(snap.me.role) ? <Announce onAir={setSnap} /> : null}
-              <p className="px-1 text-xs text-subtle">Ausgabe: {snap.outputLabel}.</p>
             </div>
           </>
         ) : null}
@@ -150,7 +152,8 @@ function NowPlaying({
 
   return (
     <Panel>
-      <div className="grid w-full min-w-0 grid-cols-1 gap-5 sm:grid-cols-[11rem_minmax(0,1fr)] sm:items-center">
+      <div className="grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-4">
+        <div className="w-30 max-w-30 shrink-0 overflow-hidden sm:w-44 sm:max-w-44">
         <Cover
           url={air.artworkUrl}
           title={air.title}
@@ -161,21 +164,28 @@ function NowPlaying({
           volume={player.muted ? 0 : snap.volume}
           onArm={() => void player.start()}
         />
+        </div>
         <div className="grid min-w-0 gap-3">
-          <div className="flex items-center gap-3 text-sm text-muted">
+          <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
             <Eq live={air.mode !== "idle"} />
-            <span>{air.via}</span>
-            <span className="text-subtle">{filters[snap.explicitFilter]}</span>
+            <span className="rounded-md bg-surface-2 px-2 py-1">{air.via}</span>
+            <span className="rounded-md bg-surface-2 px-2 py-1 text-subtle">{filters[snap.explicitFilter]}</span>
           </div>
           <div key={air.key} className="air-swap grid gap-1">
-            <h1 className="truncate font-display text-4xl leading-none tracking-tight">{air.title}</h1>
+            <h1 className="line-clamp-2 font-display text-2xl leading-tight tracking-tight sm:text-4xl">{air.title}</h1>
             <p className="truncate text-muted">{air.subtitle}</p>
           </div>
           {air.mode === "announcement" && air.announcementBody ? (
             <p className="text-sm text-ink">{air.announcementBody}</p>
           ) : null}
-          <div className="h-1 overflow-hidden rounded-sm bg-surface-2">
-            <div className="progress-fill h-full bg-signal" style={{ width: `${Math.round(progress * 100)}%` }} />
+          <div className="grid gap-1">
+            <div className="air-meter" aria-hidden="true">
+              <span className="progress-fill" style={{ width: `${Math.round(progress * 100)}%` }} />
+            </div>
+            <div className="flex justify-between text-xs tabular-nums text-subtle">
+              <span>{air.startedAt ? clock(Math.max(0, now - new Date(air.startedAt).getTime())) : "0:00"}</span>
+              <span>{air.live ? "Live" : air.durationMs > 0 ? clock(air.durationMs) : ""}</span>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm tabular-nums text-subtle">Lautstärke {snap.volume}</span>
@@ -261,7 +271,7 @@ function Cover({
   }, [volume, src]);
 
   return (
-    <div className="relative aspect-square w-full min-w-0 max-w-full overflow-hidden rounded-md bg-surface-2">
+    <div className="relative aspect-square w-full min-w-0 overflow-hidden rounded-md bg-surface-2">
       {src ? (
         <iframe
           ref={frame}
@@ -269,7 +279,7 @@ function Cover({
           title={title}
           src={src}
           allow="autoplay; encrypted-media; picture-in-picture"
-          className="h-full max-h-full w-full max-w-full"
+          className="h-full w-full"
           onLoad={() => {
             postYt(frame.current, "setVolume", [volumeRef.current]);
             if (armedRef.current) postYt(frame.current, "playVideo");
@@ -278,18 +288,17 @@ function Cover({
       ) : null}
       {url && !src ? <img src={url} alt="" className="h-full max-h-full w-full max-w-full min-w-0 object-cover" /> : null}
       {src && !armed ? (
-        <div className="absolute inset-0 grid place-items-center bg-surface/80">
-          <Button
-            type="button"
-            onClick={() => {
-              postYt(frame.current, "setVolume", [volumeRef.current]);
-              postYt(frame.current, "playVideo");
-              onArm();
-            }}
-          >
-            Ton an
-          </Button>
-        </div>
+        <button
+          type="button"
+          className="absolute inset-0 grid place-items-center bg-surface/80 px-2 text-center text-sm font-medium text-ink"
+          onClick={() => {
+            postYt(frame.current, "setVolume", [volumeRef.current]);
+            postYt(frame.current, "playVideo");
+            onArm();
+          }}
+        >
+          Ton an
+        </button>
       ) : null}
       <div className={cn("absolute inset-0 grid place-items-center", (url || src) && "hidden")}>
         {!url && !youtubeId ? (
@@ -319,7 +328,9 @@ function Queue({ snap, onChange }: { snap: StationSnapshot; onChange: (snap: Sta
       }
     >
       {snap.queue.length === 0 ? (
-        <p className="text-sm text-muted">Keine Wünsche. Es läuft {snap.fallbackName}.</p>
+        <p className="rounded-lg bg-surface-2 px-4 py-6 text-sm text-muted">
+          Keine Wünsche. Es läuft {snap.fallbackName}.
+        </p>
       ) : (
         <>
           <p className="mb-3 text-sm text-muted">Sortiert nach Zustimmung.</p>
@@ -352,38 +363,51 @@ function QueueRow({
 }) {
   const upFull = snap.budget.upUsed >= snap.budget.up && item.myVote !== 1;
   const downFull = snap.budget.downUsed >= snap.budget.down && item.myVote !== -1;
+  const upLocked = item.mine || (upFull && item.myVote !== 1);
+  const downLocked = item.mine || (downFull && item.myVote !== -1);
   return (
-    <li className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg bg-surface-2 p-2 sm:p-3">
-      <span className="w-6 text-center text-sm tabular-nums text-subtle">{index + 1}</span>
-      <div className="min-w-0">
-        <p className="truncate font-medium text-ink">{item.title}</p>
-        <p className="truncate text-sm text-muted">
-          {item.artist} · {item.mine ? "dein Wunsch" : item.addedByName}
-          {item.blocked ? " · Filter hält ihn zurück" : ""}
-        </p>
+    <li className={cn("grid gap-3 rounded-lg bg-surface-2 p-3", item.blocked && "opacity-70")}>
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="w-5 shrink-0 text-center text-sm tabular-nums text-subtle">{index + 1}</span>
+        <ArtThumb url={item.artworkUrl} title={item.title} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-medium text-ink">{item.title}</p>
+          <p className="truncate text-sm text-muted">
+            {item.artist}
+            <span> · {item.mine ? "dein Wunsch" : item.addedByName}</span>
+            {item.blocked ? " · Filter hält ihn zurück" : ""}
+          </p>
+        </div>
       </div>
-      <div className="flex items-center gap-1">
-        <VoteButton
-          label="Hoch"
-          pressed={item.myVote === 1}
-          disabled={item.mine || (upFull && item.myVote !== 1)}
-          onClick={() => void vote(item, item.myVote === 1 ? 0 : 1, onChange)}
-        />
-        <span className="w-8 text-center text-sm tabular-nums text-ink">{item.score}</span>
-        <VoteButton
-          label="Runter"
-          pressed={item.myVote === -1}
-          disabled={item.mine || (downFull && item.myVote !== -1)}
-          onClick={() => void vote(item, item.myVote === -1 ? 0 : -1, onChange)}
-        />
-        {item.mine || isDesk(snap.me.role) ? (
-          <button
-            type="button"
-            className="h-11 px-2 text-xs text-subtle"
-            onClick={() => void run(() => withdrawWish({ data: { id: item.id } }), onChange)}
+      <div className="flex items-center justify-end gap-2">
+        <div className="flex items-center rounded-md bg-canvas p-1">
+          <VoteButton
+            label="Hoch"
+            pressed={item.myVote === 1}
+            disabled={upLocked}
+            hint={item.mine ? "Eigene Wünsche stimmt man nicht ab." : upFull ? "Hoch-Kontingent ist aufgebraucht." : "Hoch"}
+            onClick={() => void vote(item, item.myVote === 1 ? 0 : 1, onChange)}
+          />
+          <span
+            className={cn(
+              "w-8 text-center text-sm tabular-nums",
+              item.score > 0 ? "text-ok" : item.score < 0 ? "text-danger" : "text-muted",
+            )}
           >
+            {item.score}
+          </span>
+          <VoteButton
+            label="Runter"
+            pressed={item.myVote === -1}
+            disabled={downLocked}
+            hint={item.mine ? "Eigene Wünsche stimmt man nicht ab." : downFull ? "Runter-Kontingent ist aufgebraucht." : "Runter"}
+            onClick={() => void vote(item, item.myVote === -1 ? 0 : -1, onChange)}
+          />
+        </div>
+        {item.mine || isDesk(snap.me.role) ? (
+          <Button variant="ghost" className="px-3 text-danger" onClick={() => void run(() => withdrawWish({ data: { id: item.id } }), onChange)}>
             Weg
-          </button>
+          </Button>
         ) : null}
       </div>
     </li>
@@ -394,11 +418,13 @@ function VoteButton({
   label,
   pressed,
   disabled,
+  hint,
   onClick,
 }: {
   label: string;
   pressed: boolean;
   disabled: boolean;
+  hint: string;
   onClick: () => void;
 }) {
   return (
@@ -406,11 +432,12 @@ function VoteButton({
       type="button"
       aria-pressed={pressed}
       aria-label={label}
+      title={hint}
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "vote h-11 w-11 rounded-md text-sm font-medium disabled:opacity-30",
-        pressed ? "bg-signal text-signal-ink" : "bg-canvas text-muted",
+        "vote h-11 w-11 rounded-md text-base font-medium disabled:opacity-30",
+        pressed ? "bg-signal text-signal-ink" : "text-muted hover:bg-surface hover:text-ink",
       )}
     >
       {label === "Hoch" ? "↑" : "↓"}
@@ -446,31 +473,22 @@ function Search({ snap, onAdded }: { snap: StationSnapshot; onAdded: (snap: Stat
       <p className="mb-3 text-sm text-muted">
         {snap.openWishes}/{MAX_OPEN_WISHES} offene Wünsche von dir.
       </p>
-      <div className="mb-3 flex gap-2 overflow-x-auto">
-        {(
-          [
-            ["preview", "30s Vorschau"],
-            ["archive", "Ganze Titel"],
-            ...(snap.youtubeOn ? ([["youtube", "YouTube"]] as const) : []),
-            ...(snap.spotifyOn ? ([["spotify", "Spotify"]] as const) : []),
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setCatalog(id)}
-            className={cn(
-              "h-11 shrink-0 rounded-md px-3 text-sm",
-              catalog === id ? "bg-signal text-signal-ink" : "bg-surface-2 text-muted",
-            )}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="mb-3">
+        <Segment
+          label="Musikquelle"
+          value={catalog}
+          onChange={setCatalog}
+          options={[
+            { id: "preview", label: "30s Vorschau" },
+            { id: "archive", label: "Ganze Titel" },
+            ...(snap.youtubeOn ? [{ id: "youtube" as const, label: "YouTube" }] : []),
+            ...(snap.spotifyOn ? [{ id: "spotify" as const, label: "Spotify" }] : []),
+          ]}
+        />
       </div>
       <form className="flex gap-2" onSubmit={(event) => void onSearch(event)}>
         <input
-          className={fieldClass}
+          className={cn(fieldClass, "min-w-0 flex-1")}
           value={query}
           placeholder={
             catalog === "archive"
@@ -490,7 +508,8 @@ function Search({ snap, onAdded }: { snap: StationSnapshot; onAdded: (snap: Stat
       </form>
       <ul className="mt-3 grid gap-2">
         {hits.map((hit) => (
-          <li key={`${hit.externalId}-${hit.title}`} className="flex items-center gap-3">
+          <li key={`${hit.externalId}-${hit.title}`} className="flex items-center gap-3 rounded-lg bg-surface-2 p-2">
+            <ArtThumb url={hit.artworkUrl} title={hit.title} />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{hit.title}</p>
               <p className="truncate text-xs text-muted">
