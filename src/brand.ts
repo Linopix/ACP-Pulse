@@ -49,9 +49,10 @@ export const brand = {
 } as const;
 
 /** Schreibt die Marke als CSS-Variablen. Nicht duplizieren. */
-export function brandCss(): string {
+export function brandCss(signalOverride?: string): string {
   const c = brand.colors;
   const r = brand.radius;
+  const signal = signalHex(signalOverride ?? "") ?? c.signal;
   return `:root{
     --brand-canvas:${c.canvas};
     --brand-surface:${c.surface};
@@ -60,8 +61,8 @@ export function brandCss(): string {
     --brand-muted:${c.muted};
     --brand-subtle:${c.subtle};
     --brand-line:${c.line};
-    --brand-signal:${c.signal};
-    --brand-signal-ink:${c.signalInk};
+    --brand-signal:${signal};
+    --brand-signal-ink:${signalInk(signal)};
     --brand-danger:${c.danger};
     --brand-ok:${c.ok};
     --brand-font-display:${brand.fonts.display};
@@ -71,4 +72,21 @@ export function brandCss(): string {
     --brand-radius-lg:${r.lg};
     --brand-radius-xl:${r.xl};
   }`;
+}
+
+/** Nur #rrggbb. Alles andere ist keine Signalfarbe. */
+export function signalHex(value: string): string | null {
+  const hex = value.trim().toLowerCase();
+  return /^#[0-9a-f]{6}$/.test(hex) ? hex : null;
+}
+
+/** Dunkle Schrift auf hellem Signal, helle Schrift auf dunklem. */
+export function signalInk(signal: string): string {
+  const hex = signalHex(signal) ?? brand.colors.signal;
+  const n = Number.parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  const y = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return y > 0.45 ? "#06211c" : "#f3f6f4";
 }

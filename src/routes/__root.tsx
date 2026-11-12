@@ -3,6 +3,7 @@ import { Toaster } from "sonner";
 import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { brand, brandCss } from "@/brand";
+import { BrandSync } from "@/components/pulse-brand";
 import appCss from "../styles.css?url";
 
 export const Route = createRootRoute({
@@ -35,6 +36,7 @@ export const Route = createRootRoute({
       </head>
       <body>
         <PreviewHostBridge />
+        <BrandSync />
         <AuthProvider>
           <Outlet />
         </AuthProvider>

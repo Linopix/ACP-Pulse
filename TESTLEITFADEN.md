@@ -63,8 +63,31 @@ So prüfst du es mit einem Konto: Grenze auf 4 stellen und speichern. Drei Wüns
 | Sender | https-Stream anlegen, Zeitfenster jetzt bis in ein paar Minuten | Zur Startzeit übernimmt der Stream. YouTube bleibt im Browser. |
 | Moderation | Slots, Themen, Firmennotizen, «Skript erzeugen» | Mit KI-Zugang ein kurzer Text, sonst der Hinweis, dass Durchsagen von Hand gehen. «Sofort auf Sendung» unterbricht. |
 | Rollen | Zweites Konto auf DJ | Pult ja, Regie nein. |
+| Marke | Firma, Produkt, Satz, Signalfarbe speichern | Anmeldung und Leiste zeigen den neuen Namen und die Farbe. Leere Felder stellen `src/brand.ts` wieder her. Schriften bleiben dort. |
+| Playlists | «Testen» an einer Liste mit Titeln | Meldung, wie viele der ersten Titel erreichbar sind. Nichts startet. |
+| Sender | «Testen» an einem https-Stream | Meldung, ob der Stream antwortet. Nichts startet. |
 
-Farben und Name stehen nur in `src/brand.ts`. Die Oberfläche liest diese Variablen.
+## Bereiche
+
+1. Zwei Browser, beide angemeldet, beide «Ton an».
+2. Regie → Bereiche: beide Geräte in denselben Bereich, Lautstärke dort anders als die der Sendung.
+3. Erwartung: nur diese Geräte werden leiser oder lauter. Die Queue und der laufende Titel bleiben eine Sendung.
+4. Musikplan oder Kalender auf diesen Bereich, Wünsche aus. Erwartung: in dem Bereich sind Wünsche zu. Ein Gerät ohne diesen Bereich hört weiter und kann weiter wünschen, wenn das Haus Wünsche erlaubt.
+
+## Gleichlauf
+
+Debug in der Regie zeigt Drift, Tempo und «Gruppe» oder «allein».
+
+1. Zwei Geräte im selben Bereich, beide hören. Nach dem nächsten Herzschlag steht «Gruppe». Ein Versatz über etwa 0,22 Sekunden (YouTube etwa 0,18) wird nachgezogen, nicht erst bei 0,8 Sekunden.
+2. Ein Gerät allein, oder das einzige im Bereich: «allein». Kleine Versätze gleicht nur ein leises Tempo aus. Ein Sprung kommt erst über 1,5 Sekunden (YouTube 1,2), damit ein einzelner Hörer keinen hörbaren Satz hört.
+
+## Spotify-Playlist
+
+Regie → Playlists, öffentlichen Spotify-Link einfügen, anbinden.
+
+Erwartung: die Liste hängt an, die Titel laufen über YouTube. Was YouTube nicht hergibt, bleibt eine 30-Sekunden-Vorschau. Das ist kein persönliches Spotify-Konto und kein Spotify-Player in der Sendung.
+
+Farben und Name stehen in `src/brand.ts` und lassen sich in der Regie unter Marke überschreiben. Die Oberfläche liest diese Werte.
 
 ## Pult
 
@@ -140,6 +163,6 @@ Images heissen `pulse:test` und `pulse-receiver:test`. In einem richtigen Cluste
 
 - Vorschau-Katalog: etwa 30 Sekunden, https, geht an den Receiver.
 - Internet Archive: ganze Titel ohne Abo, https, geht an den Receiver.
-- Spotify: Suche bleibt aus, bis eine Verbindung da ist.
+- Spotify: Suche über den gemeinsamen Katalog (YouTube oder 30-Sekunden-Vorschau), auch ohne verbundenes Konto. Kein Spotify-Player an der Box.
 - YouTube: nur Browser.
 - Text-Durchsage: Stimme im Browser, keine Datei an der Box. Mikrofon-Aufnahme ist eine Datei und kann mit.

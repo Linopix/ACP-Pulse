@@ -1,5 +1,7 @@
 import { pendingMigrations } from "../../scripts/migration-plan.mjs";
 
+// Schema source: migrations/*.sql (eager glob, re-applied when this module reloads). Includes 0007.
+
 /** Which database backend is active. */
 export type DbSource = "neon" | "pglite";
 

@@ -2,7 +2,7 @@
 
 Mitarbeiter-Radio. Wer angemeldet ist, hört dieselbe Sendung, legt Wünsche in die Queue und stimmt ab. Die Regie legt fest, was laufen darf, wie laut es ist und wohin der Ton geht. Ein DJ macht Durchsagen und schaltet echte Sender dazu.
 
-Der Name und die Farben stehen nur in [`src/brand.ts`](src/brand.ts). Die Oberfläche liest diese Werte, sie sind nicht noch einmal im CSS verdoppelt.
+Der Name und die Farben stehen in [`src/brand.ts`](src/brand.ts). Die Regie kann Firma, Produkt, Satz und Signalfarbe unter Marke überschreiben. Leere Felder fallen auf diese Datei zurück. Schriften bleiben dort. Die Oberfläche liest die Werte, sie sind nicht noch einmal im CSS verdoppelt.
 
 Bedienung prüfen: [`TESTLEITFADEN.md`](TESTLEITFADEN.md).
 
@@ -13,7 +13,7 @@ Bedienung prüfen: [`TESTLEITFADEN.md`](TESTLEITFADEN.md).
 | `/` | angemeldet | Sendung, Suche, Queue, Stimmen |
 | `/login` | alle | Konto anlegen oder anmelden |
 | `/dj` | DJ, Regie | Mikrofon, Aufnahmen, Sender jetzt, fremde Audiodatei |
-| `/admin` | Regie | Ausgabe, Programm, Musikplan, Kalender, Dienste, Sender, Playlists, Moderation, Nutzer |
+| `/admin` | Regie | Ausgabe, Bereiche, Programm, Musikplan, Kalender, Dienste, Sender, Playlists, Moderation, Nutzer, Debug, Marke |
 
 Das erste Konto wird Regie. Die letzte Regie kann sich nicht selbst auf Hörer oder DJ setzen. Ein DJ sieht das Pult, nicht die Regie.
 
@@ -55,7 +55,30 @@ Status eines Wunsches: `queued`, `playing`, `played`, `kicked`, `pruned`.
 | `clean` | nur das Explicit-Flag der Quelle |
 | `strict` | Explicit plus Sperrwörter in Titel oder Artist |
 
-Die eingebaute Wortliste ist `DEFAULT_BLOCKLIST`. Die Regie ergänzt sie komma- oder zeilenweise. Ein Kalendereintrag überschreibt für sein Zeitfenster Lautstärke, Wunscherlaubnis und Filter. Danach gelten wieder die Normalwerte.
+Die eingebaute Wortliste ist `DEFAULT_BLOCKLIST`. Die Regie ergänzt sie komma- oder zeilenweise. Ein Kalendereintrag fürs ganze Haus überschreibt für sein Zeitfenster Lautstärke, Wunscherlaubnis und Filter. Danach gelten wieder die Normalwerte. Ein Eintrag für einen Bereich ändert nur Lautstärke und Wünsche an den Geräten dort, nicht die gemeinsame Queue.
+
+## Audiobereiche
+
+Regie → Bereiche benennt Geräte und legt sie in höchstens zwölf Bereiche. Jeder Bereich hat eine eigene Lautstärke. Geräte ohne Bereich nehmen die Lautstärke der Sendung.
+
+Musikplan und Kalender kennen «Ganzes Haus» oder einen Bereich. Ganzes Haus steuert die Sendung. Ein Bereich steuert nur Lautstärke und Wunscherlaubnis der Geräte darin. Der laufende Titel und die Queue bleiben eine Sendung.
+
+Ein Gerät gilt als verbunden, wenn es sich in den letzten 12 Sekunden gemeldet hat. Älter als 14 Tage verschwindet es aus der Liste.
+
+## Gleichlauf
+
+`stationSeconds` ist die gemeinsame Uhr ab `startedAt`. `syncNudge` in [`src/lib/pulse/logic.ts`](src/lib/pulse/logic.ts) entscheidet Tempo oder Sprung. Eng wird nur nachgezogen, wenn mindestens ein weiteres Gerät desselben Bereichs online ist. Allein hört niemand den Versatz, ein Sprung würde nur auffallen.
+
+| Lage | Verhalten |
+| --- | --- |
+| Allein, oder einziges Gerät im Bereich | Unter 80 ms nichts. Bis 1,5 s Tempo 0,988–1,012. Darüber ein Sprung. YouTube springt erst ab 1,2 s. |
+| Gruppe im selben Bereich | Unter 40 ms nichts. Bis 0,22 s Tempo 0,96–1,04. Darüber ein Sprung, damit 0,8 s Versatz im Raum nicht stehen bleibt. YouTube springt ab 0,18 s, weil es kein Feintempo kann. |
+
+Livestreams werden nicht geschoben. Debug in der Regie zeigt Drift, Tempo und ob das Gerät «Gruppe» oder «allein» ist.
+
+## Marke
+
+Regie → Marke setzt Firmenname, Produktname, Satz und Signalfarbe. Leer lassen stellt den Wert aus `brand.ts` wieder her. Die Anmeldung liest `GET /api/brand`.
 
 ## Musikquellen
 
@@ -65,9 +88,11 @@ Die eingebaute Wortliste ist `DEFAULT_BLOCKLIST`. Die Regie ergänzt sie komma- 
 | `archive` | Suche «Ganze Titel» | Internet Archive, ganze MP3, ohne Abo |
 | `youtube` | Dienst «YouTube», Suche, Link oder hinterlegte Playlist | oEmbed, Innertube oder API-Schlüssel. Browser und Receiver-Seite |
 | `link` | Pult, direkte Audiodatei | mp3, m4a, ogg, wav über https |
-| `spotify` | Dienst «Spotify» | Client Credentials. Metadaten von Spotify, Ton über Vorschau oder 30s-Ersatz |
+| `spotify` | Dienst «Spotify», Suche und Playlist-Link | Metadaten, wenn ein Token da ist. Der Ton der gemeinsamen Sendung ist nie der Spotify-Player: Suche und Import spielen über YouTube, sonst eine 30-Sekunden-Vorschau. |
 
-YouTube und Spotify sind Dienste unter Regie → Dienste, nicht nur ein Schalter. Ohne Zugangsdaten sucht YouTube öffentlich, Spotify bleibt stumm, bis Client-ID und Geheimnis da sind. `TrackInput` kennt weiter `source` und `externalId`.
+YouTube und Spotify sind Dienste unter Regie → Dienste, nicht nur ein Schalter. Ohne Schlüssel sucht YouTube öffentlich. Spotify sucht auch ohne verbundenes Konto über denselben gemeinsamen Katalog (YouTube oder 30-Sekunden-Vorschau), sobald der Dienst an ist. Ein persönliches Spotify-Konto ist optional und kein Player der Sendung. `TrackInput` kennt weiter `source` und `externalId`.
+
+Unter Playlists hängt ein öffentlicher Spotify-Link dieselbe Liste an und wandelt die Titel nach YouTube. Was YouTube nicht hergibt, bleibt eine 30-Sekunden-Vorschau. «Testen» prüft die ersten Titel einer Playlist und den Stream eines Senders, ohne etwas zu starten und ohne Zugangsdaten anzuzeigen.
 
 Microsoft 365 liest einen Kalender (App mit Calendars.Read oder ein ICS aus Outlook) in den Musikplan. Dieselbe App meldet das Team an, siehe unten. Piper spricht Durchsagen mit Kerstin oder Eva, beides weiblich. Ohne Piper-Adresse spricht der Browser, mit Adresse geht dieselbe Ansage als Datei an die Boxen.
 
@@ -111,7 +136,7 @@ Der Musikplan setzt pro Block Lautstärke, Wünsche, Filter und Energie. Das Pul
 
 Der Test-Receiver ([`receiver/server.mjs`](receiver/server.mjs)) ist der Lautsprecher unter `/`. «Ton an» startet die Wiedergabe, `/v1/now` ist der aktuelle Beitrag. Ohne erreichbares Sonos-Gerät antwortet ein Testlautsprecher und legt die SOAP-Umschläge ins Journal. Mit Gerät gehen `SetAVTransportURI`, `Play` und `SetVolume` an Port 1400.
 
-Die Standardmusik sind die YouTube-Playlists Chill, Pop Charts, Fokus und Jazz. Ein Spotify- oder YouTube-Playlist-Link hängt unter Regie → Playlists dieselbe Liste an. Spotify-Titel werden über YouTube gespielt, sonst über eine 30-Sekunden-Vorschau.
+Die Standardmusik sind die YouTube-Playlists Chill, Pop Charts, Fokus und Jazz. Ein Spotify- oder YouTube-Playlist-Link hängt unter Regie → Playlists dieselbe Liste an. Spotify-Titel werden über YouTube gespielt, sonst über eine 30-Sekunden-Vorschau. Das ist kein verbundenes Spotify-Konto.
 
 | Pfad | Bedeutung |
 | --- | --- |
@@ -140,6 +165,8 @@ Migrationen in [`migrations/`](migrations/):
 | `0003_desk.sql` | Aufnahmen, Sender, Zeitfenster |
 | `0004_prune.sql` | `wish_prune`, `wish_prune_at` |
 | `0005_services.sql` | Dienste, Nutzerstatus, Piper-Stimme, Musikplan |
+| `0006_areas.sql` | Audiobereiche und Geräte |
+| `0007_zones_brand.sql` | Bereich an Musikplan und Kalender, Firmenmarke |
 
 Ohne `DATABASE_URL` läuft Postgres im Prozess (PGLite). Mit gesetzter URL ist es Neon, ohne Codeänderung. Typen der Antworten: [`src/lib/pulse/types.ts`](src/lib/pulse/types.ts).
 
@@ -203,18 +230,26 @@ npm run typecheck
 | Datei | Aufgabe |
 | --- | --- |
 | `src/brand.ts` | Name, Farben, Schriften, Radien |
-| `src/lib/pulse/logic.ts` | Stimmen, Filter, Aufräumen, YouTube-Link, Rollen |
-| `src/lib/pulse/api.ts` | Serverfunktionen, Playback, Dispatch |
+| `src/lib/pulse/logic.ts` | Stimmen, Filter, Aufräumen, Gleichlauf, YouTube-Link, Rollen |
+| `src/lib/pulse/api.ts` | Serverfunktionen, Playback, Dispatch, Bereiche |
+| `src/lib/pulse/services.ts` | YouTube, Spotify-Suche und Playlist-Import, Kalender, Piper |
+| `src/lib/pulse/brand-public.ts` | Marke ohne Anmeldung, für die Startseite |
 | `src/lib/pulse/microsoft.ts` | Anmeldung über Entra, ohne die Auth-Konfiguration anzufassen |
 | `src/lib/pulse/cues.ts` | Kennungen nur im Browser, nicht auf Sendung |
 | `src/lib/pulse/types.ts` | Snapshots, die die Oberfläche bekommt |
-| `src/components/pulse-station.tsx` | Sendung |
+| `src/components/pulse-station.tsx` | Sendung, Queue, Gleichlauf |
+| `src/components/pulse-listen.tsx` | Ton an und Leise hier auf Pult und Regie |
 | `src/components/pulse-dj.tsx` | Pult |
-| `scripts/install-piper.sh` | Piper und die Stimmen Kerstin, Eva |
-| `scripts/piper-server.mjs` | Sprachdienst, JSON rein, WAV raus |
-| `src/components/pulse-admin.tsx` | Regie |
+| `src/components/pulse-admin.tsx` | Regie, Playlists, Sender, Marke |
+| `src/components/pulse-areas.tsx` | Bereiche und Debug |
+| `src/components/pulse-area.tsx` | Herzschlag des Geräts, Lautstärke des Bereichs |
+| `src/components/pulse-plan.tsx` | Musikplan, Tagesstreifen |
+| `src/components/pulse-brand.tsx` | Marke live in der Oberfläche |
+| `src/components/pulse-nav.tsx` | Leiste und Kanäle |
 | `src/components/pulse-guide.tsx` | Führung |
 | `src/components/pulse-ui.tsx` | Leiste, Flächen, Knöpfe |
+| `scripts/install-piper.sh` | Piper und die Stimmen Kerstin, Eva |
+| `scripts/piper-server.mjs` | Sprachdienst, JSON rein, WAV raus |
 | `receiver/server.mjs` | Test-Receiver und Sonos-SOAP |
 
 ## KI, noch nicht angeschlossen

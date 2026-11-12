@@ -10,6 +10,7 @@
  * (Stimmen, Filter, Aufräumen) liegen in logic.ts.
  */
 import { createServerFn } from "@tanstack/react-start";
+import { signalHex } from "@/brand";
 import { getSql, type Sql } from "@/lib/db";
 import { authMiddleware } from "@/lib/auth/middleware";
 import {
@@ -19,6 +20,8 @@ import {
   clampKick,
   clampPruneAt,
   clampVolume,
+  deviceOnline,
+  DEVICE_ONLINE_MS,
   isBlocked,
   isDesk,
   nextSlot,
@@ -40,11 +43,17 @@ import {
   type OutputTarget,
   type PiperVoiceId,
 } from "@/lib/pulse/logic";
-import { fetchPiper, graphEvents, graphToken, searchSpotify, searchYoutube, spotifyPlaylist, spotifyToken, youtubePlaylist } from "@/lib/pulse/services";
+import { fetchPiper, graphEvents, graphToken, searchSpotify, searchYoutube, spotifyAccess, spotifyPlaylist, spotifyToken, youtubePlaylist } from "@/lib/pulse/services";
 import type {
   AdminSnapshot,
   AnnouncementRecord,
+  AreaSnapshot,
+  AudioDevice,
+  AudioZone,
+  BrandSettings,
   DeskSnapshot,
+  DeviceTouch,
+  HouseImport,
   MemberRecord,
   OutputProbe,
   PlanBlock,
@@ -61,6 +70,7 @@ import type {
   ServiceId,
   ServiceState,
   SettingsRecord,
+  SourceProbe,
   StationSnapshot,
   TrackInput,
   TrackSource,
@@ -335,14 +345,14 @@ async function loadEffective(sql: Sql): Promise<Effective> {
   const base = mapSettings(settingsRows[0] ?? {});
   const rules = await sql<Row>`
     select * from calendar_rules
-    where starts_at <= now() and ends_at >= now()
+    where zone_id is null and starts_at <= now() and ends_at >= now()
     order by starts_at desc
     limit 1
   `;
   const rule = rules[0];
   const blocks = await sql<Row>`
     select * from plan_blocks
-    where starts_at <= now() and ends_at >= now()
+    where zone_id is null and starts_at <= now() and ends_at >= now()
     order by starts_at desc
     limit 1
   `;
@@ -1037,6 +1047,7 @@ async function buildSnapshot(sql: Sql, userId: string, memberName: string, email
     piperName: piperVoice(services.piper.voice).name,
     youtubeOn: services.youtube.enabled,
     spotifyOn: services.spotify.enabled,
+    spotifyAccount: services.spotify.accountName,
   };
 }
 
@@ -1173,12 +1184,18 @@ function parseRule(input: unknown): RuleInput {
     wishesEnabled: o.wishesEnabled == null ? null : o.wishesEnabled === true,
     explicitFilter: asFilterOrNull(o.explicitFilter),
     note: clip(o.note, 240),
+    zoneId: optionalZone(o.zoneId),
   };
 }
 
 async function loadAdmin(sql: Sql, userId: string): Promise<AdminSnapshot> {
   const settings = await loadBaseSettings(sql);
-  const rules = await sql<Row>`select * from calendar_rules order by starts_at asc`;
+  const rules = await sql<Row>`
+    select r.*, coalesce(z.name, '') as zone_name
+    from calendar_rules r
+    left join audio_zones z on z.id = r.zone_id
+    order by r.starts_at asc
+  `;
   const now = Date.now();
   const playlists = await sql<Row>`select * from playlists order by is_fallback desc, name asc`;
   const tracks = await sql<Row>`select * from playlist_tracks order by position asc, id asc`;
@@ -1218,6 +1235,8 @@ async function loadAdmin(sql: Sql, userId: string): Promise<AdminSnapshot> {
         explicitFilter: asFilterOrNull(row.explicit_filter),
         note: asText(row.note),
         active: startMs <= now && endMs >= now,
+        zoneId: row.zone_id == null ? null : asNum(row.zone_id),
+        zoneName: asText(row.zone_name),
       } satisfies RuleRecord;
     }),
     playlists: playlists.map((row) => ({
@@ -1248,6 +1267,8 @@ async function loadAdmin(sql: Sql, userId: string): Promise<AdminSnapshot> {
     slots,
     plan: await loadPlan(sql),
     services: publishServices(await loadServices(sql)),
+    zones: await loadZoneList(sql),
+    brand: await loadBrand(sql),
     nextSlot: slot ? slot.toISOString() : null,
     suggestedReceiver: await suggestedReceiver(),
   };
@@ -1256,6 +1277,41 @@ async function loadAdmin(sql: Sql, userId: string): Promise<AdminSnapshot> {
 async function loadBaseSettings(sql: Sql): Promise<SettingsRecord> {
   const rows = await sql<Row>`select * from station_settings where id = 1`;
   return mapSettings(rows[0] ?? {});
+}
+
+function optionalZone(value: unknown): number | null {
+  if (value == null || value === "" || value === 0 || value === "0") return null;
+  const n = asNum(value);
+  return n > 0 ? n : null;
+}
+
+async function knownZone(sql: Sql, zoneId: number | null) {
+  if (zoneId == null) return;
+  const zone = await sql<Row>`select id from audio_zones where id = ${zoneId}`;
+  if (!zone[0]) fail("Bereich nicht gefunden.");
+}
+
+async function loadZoneList(sql: Sql): Promise<AudioZone[]> {
+  const zones = await sql<Row>`select id, name, volume from audio_zones order by lower(name) asc, id asc`;
+  return zones.map((row) => ({
+    id: asNum(row.id),
+    name: asText(row.name),
+    volume: clampVolume(asNum(row.volume)),
+  }));
+}
+
+async function loadBrand(sql: Sql): Promise<BrandSettings> {
+  const rows = await sql<Row>`
+    select brand_company, brand_product, brand_tagline, brand_signal
+    from station_settings where id = 1
+  `;
+  const row = rows[0] ?? {};
+  return {
+    companyName: asText(row.brand_company),
+    productName: asText(row.brand_product),
+    tagline: asText(row.brand_tagline),
+    signal: signalHex(asText(row.brand_signal)) ?? "",
+  };
 }
 
 const SEEDED_STATIONS: [string, string, string][] = [
@@ -1423,17 +1479,22 @@ export const searchMusic = createServerFn({ method: "POST" })
     return { query, catalog };
   })
   .middleware([authMiddleware])
-  .handler(async ({ data }) => {
-    if (data.catalog === "archive") return searchArchive(data.query);
+  .handler(async ({ context, data }) => {
     const sql = await getSql();
+    const identity = await loadIdentity(sql, context.userId);
+    const member = await ensureMember(sql, context.userId, identity.name);
+    const effective = await loadEffective(sql);
+    const catalog = isDesk(member.role) ? data.catalog : effective.musicSource;
+    if (catalog === "archive") return searchArchive(data.query);
     const services = await loadServices(sql);
-    if (data.catalog === "youtube") {
+    if (catalog === "youtube") {
       if (!services.youtube.enabled) fail("YouTube ist in der Regie ausgeschaltet.");
       return searchYoutube(data.query, services.youtube.key);
     }
-    if (data.catalog === "spotify") {
+    if (catalog === "spotify") {
       if (!services.spotify.enabled) fail("Spotify ist in der Regie ausgeschaltet.");
-      return searchSpotify(data.query, services.spotify.clientId, services.spotify.secret);
+      const token = await spotifyAccess(services.spotify);
+      return searchSpotify(data.query, services.spotify.clientId, services.spotify.secret, token);
     }
     return searchItunes(data.query);
   });
@@ -1456,6 +1517,9 @@ export const addWish = createServerFn({ method: "POST" })
       }
       if (data.source === "link" && !isDesk(member.role)) {
         fail("Direkte Audiodateien legt das Pult auf.");
+      }
+      if (!isDesk(member.role) && data.source !== effective.musicSource) {
+        fail("Wünsche laufen nur über die Quelle, die die Regie gewählt hat.");
       }
       if (data.source === "youtube" && !isDesk(member.role)) {
         const services = await loadServices(sql);
@@ -1560,7 +1624,7 @@ export const withdrawWish = createServerFn({ method: "POST" })
       const rows = await sql<Row>`select added_by, status from queue_items where id = ${data.id}`;
       const row = rows[0];
       if (!row || asText(row.status) !== "queued") fail("Der Titel ist nicht mehr in der Queue.");
-      if (asText(row.added_by) !== context.userId && member.role !== "admin") {
+      if (asText(row.added_by) !== context.userId && !isDesk(member.role)) {
         fail("Nur eigene Wünsche lassen sich zurückziehen.");
       }
       await sql`delete from queue_items where id = ${data.id}`;
@@ -1574,9 +1638,9 @@ export const skipTrack = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     return withRadioLock(async () => {
       const sql = await getSql();
-      const admin = await requireAdmin(sql, context.userId);
+      const desk = await requireDesk(sql, context.userId);
       await advancePlayback(sql, { force: true });
-      return buildSnapshot(sql, context.userId, admin.name, admin.email, "admin");
+      return buildSnapshot(sql, context.userId, desk.name, desk.email, desk.role);
     });
   });
 
@@ -1592,13 +1656,13 @@ export const postAnnouncement = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     return withRadioLock(async () => {
       const sql = await getSql();
-      const admin = await requireAdmin(sql, context.userId);
+      const desk = await requireDesk(sql, context.userId);
       await sql`
         insert into announcements (kind, title, body, status, air_at, created_by, created_by_name)
-        values ('manual', ${data.title}, ${data.body}, 'queued', null, ${context.userId}, ${admin.name})
+        values ('manual', ${data.title}, ${data.body}, 'queued', null, ${context.userId}, ${desk.name})
       `;
       await advancePlayback(sql, { interrupt: true });
-      return buildSnapshot(sql, context.userId, admin.name, admin.email, "admin");
+      return buildSnapshot(sql, context.userId, desk.name, desk.email, desk.role);
     });
   });
 
@@ -1614,6 +1678,204 @@ export const getAdmin = createServerFn({ method: "GET" })
       return loadAdmin(sql, context.userId);
     });
   });
+
+export const touchDevice = createServerFn({ method: "POST" })
+  .validator((input: { id?: string; room?: string; hearing?: boolean; userAgent?: string; detail?: string }) => {
+    const id = clip(input?.id, 80).toLowerCase();
+    if (!/^[a-z0-9-]{8,80}$/.test(id)) fail("Gerät nicht erkannt.");
+    const room = input?.room === "pult" || input?.room === "regie" ? input.room : "sendung";
+    return {
+      id,
+      room,
+      hearing: input?.hearing === true,
+      userAgent: clip(input?.userAgent, 180),
+      detail: clip(input?.detail, 400),
+    };
+  })
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }): Promise<DeviceTouch> => {
+    const sql = await getSql();
+    const identity = await loadIdentity(sql, context.userId);
+    const member = await ensureMember(sql, context.userId, identity.name);
+    await sql`
+      insert into audio_devices (id, user_id, user_name, room, user_agent, last_seen, hearing, detail)
+      values (${data.id}, ${context.userId}, ${member.name}, ${data.room}, ${data.userAgent}, now(), ${data.hearing}, ${data.detail})
+      on conflict (id) do update set
+        user_id = excluded.user_id,
+        user_name = excluded.user_name,
+        room = excluded.room,
+        user_agent = excluded.user_agent,
+        last_seen = now(),
+        hearing = excluded.hearing,
+        detail = excluded.detail
+    `;
+    const rows = await sql<Row>`
+      select d.name as device_name, d.zone_id, z.name as zone_name, z.volume as zone_volume
+      from audio_devices d
+      left join audio_zones z on z.id = d.zone_id
+      where d.id = ${data.id}
+    `;
+    const row = rows[0] ?? {};
+    const zoneId = row.zone_id == null ? null : asNum(row.zone_id);
+    const zoned = zoneId != null && row.zone_volume != null;
+    const effective = await loadEffective(sql);
+    const program = zoneId == null ? null : await zoneProgram(sql, zoneId);
+    const volume = program?.volume ?? (zoned ? clampVolume(asNum(row.zone_volume)) : effective.volume);
+    const wishes = program?.wishes ?? effective.wishesEnabled;
+    // Enger Gleichlauf nur, wenn noch ein anderes Gerät desselben Bereichs online ist.
+    let syncTight = false;
+    if (zoneId != null) {
+      const peers = await sql<Row>`
+        select count(*)::int as n from audio_devices
+        where zone_id = ${zoneId}
+          and id <> ${data.id}
+          and last_seen > now() - (${DEVICE_ONLINE_MS} * interval '1 millisecond')
+      `;
+      syncTight = asNum(peers[0]?.n) >= 1;
+    }
+    return {
+      volume,
+      wishes,
+      syncTight,
+      zoneId,
+      zoneName: zoned ? asText(row.zone_name) : "",
+      deviceName: asText(row.device_name),
+    };
+  });
+
+async function zoneProgram(sql: Sql, zoneId: number): Promise<{ volume: number | null; wishes: boolean | null }> {
+  const blocks = await sql<Row>`
+    select volume, wishes_enabled from plan_blocks
+    where zone_id = ${zoneId} and starts_at <= now() and ends_at >= now()
+    order by starts_at desc
+    limit 1
+  `;
+  const rules = await sql<Row>`
+    select volume, wishes_enabled from calendar_rules
+    where zone_id = ${zoneId} and starts_at <= now() and ends_at >= now()
+    order by starts_at desc
+    limit 1
+  `;
+  const block = blocks[0];
+  const rule = rules[0];
+  const volume = block?.volume != null
+    ? clampVolume(asNum(block.volume))
+    : rule?.volume != null
+      ? clampVolume(asNum(rule.volume))
+      : null;
+  const wishes = block?.wishes_enabled != null
+    ? asBool(block.wishes_enabled)
+    : rule?.wishes_enabled != null
+      ? asBool(rule.wishes_enabled)
+      : null;
+  return { volume, wishes };
+}
+
+export const getAreas = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const sql = await getSql();
+    await requireAdmin(sql, context.userId);
+    return loadAreas(sql);
+  });
+
+export const saveZone = createServerFn({ method: "POST" })
+  .validator((input: { id?: number; name?: string; volume?: number }) => {
+    const name = clip(input?.name, 40);
+    if (name.length < 2) fail("Der Bereich braucht einen Namen.");
+    return { id: asNum(input?.id), name, volume: clampVolume(asNum(input?.volume, 42)) };
+  })
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    await requireAdmin(sql, context.userId);
+    const taken = await sql<Row>`
+      select id from audio_zones where lower(name) = lower(${data.name}) and id <> ${data.id} limit 1
+    `;
+    if (taken[0]) fail("Diesen Bereich gibt es schon.");
+    if (data.id) {
+      const existing = await sql<Row>`select id from audio_zones where id = ${data.id}`;
+      if (!existing[0]) fail("Bereich nicht gefunden.");
+      await sql`update audio_zones set name = ${data.name}, volume = ${data.volume} where id = ${data.id}`;
+    } else {
+      const count = await sql<Row>`select count(*)::int as n from audio_zones`;
+      if (asNum(count[0]?.n) >= 12) fail("Höchstens 12 Bereiche.");
+      await sql`insert into audio_zones (name, volume) values (${data.name}, ${data.volume})`;
+    }
+    return loadAreas(sql);
+  });
+
+export const deleteZone = createServerFn({ method: "POST" })
+  .validator((input: { id?: number }) => {
+    const id = asNum(input?.id);
+    if (!id) fail("Bereich fehlt.");
+    return { id };
+  })
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    await requireAdmin(sql, context.userId);
+    await sql`update audio_devices set zone_id = null where zone_id = ${data.id}`;
+    await sql`delete from audio_zones where id = ${data.id}`;
+    return loadAreas(sql);
+  });
+
+export const saveDevice = createServerFn({ method: "POST" })
+  .validator((input: { id?: string; name?: string; zoneId?: number | null }) => {
+    const id = clip(input?.id, 80).toLowerCase();
+    if (!/^[a-z0-9-]{8,80}$/.test(id)) fail("Gerät nicht erkannt.");
+    const zoneId = input?.zoneId == null || input.zoneId === 0 ? null : asNum(input.zoneId);
+    return { id, name: clip(input?.name, 40), zoneId };
+  })
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    await requireAdmin(sql, context.userId);
+    const existing = await sql<Row>`select id from audio_devices where id = ${data.id}`;
+    if (!existing[0]) fail("Gerät nicht verbunden.");
+    if (data.zoneId != null) {
+      const zone = await sql<Row>`select id from audio_zones where id = ${data.zoneId}`;
+      if (!zone[0]) fail("Bereich nicht gefunden.");
+    }
+    await sql`update audio_devices set name = ${data.name}, zone_id = ${data.zoneId} where id = ${data.id}`;
+    return loadAreas(sql);
+  });
+
+async function loadAreas(sql: Sql): Promise<AreaSnapshot> {
+  await sql`delete from audio_devices where last_seen < now() - interval '14 days'`;
+  const zones = await sql<Row>`select * from audio_zones order by lower(name) asc, id asc`;
+  const devices = await sql<Row>`select * from audio_devices order by last_seen desc, id asc`;
+  const effective = await loadEffective(sql);
+  const air = await buildNow(sql, await readPlayback(sql));
+  const now = Date.now();
+  return {
+    zones: zones.map((row) => ({
+      id: asNum(row.id),
+      name: asText(row.name),
+      volume: clampVolume(asNum(row.volume)),
+    })),
+    devices: devices.map((row) => {
+      const lastSeen = asIso(row.last_seen) ?? "";
+      return {
+        id: asText(row.id),
+        name: asText(row.name),
+        zoneId: row.zone_id == null ? null : asNum(row.zone_id),
+        userName: asText(row.user_name),
+        room: asText(row.room),
+        lastSeen,
+        online: deviceOnline(lastSeen, now),
+        hearing: asBool(row.hearing),
+        userAgent: asText(row.user_agent),
+        detail: asText(row.detail),
+      } satisfies AudioDevice;
+    }),
+    air,
+    volume: effective.volume,
+    outputTarget: effective.outputTarget,
+    outputLabel: outputLabel(effective.outputTarget, effective.sonosRoom),
+    receiverUrl: effective.receiverUrl,
+  };
+}
 
 export const saveSettings = createServerFn({ method: "POST" })
   .validator((input: unknown) => parseSettings(input))
@@ -1674,6 +1936,7 @@ export const saveRule = createServerFn({ method: "POST" })
     return withRadioLock(async () => {
       const sql = await getSql();
       await requireAdmin(sql, context.userId);
+      await knownZone(sql, data.zoneId);
       if (data.id) {
         const updated = await sql`
           update calendar_rules set
@@ -1683,7 +1946,8 @@ export const saveRule = createServerFn({ method: "POST" })
             volume = ${data.volume},
             wishes_enabled = ${data.wishesEnabled},
             explicit_filter = ${data.explicitFilter},
-            note = ${data.note}
+            note = ${data.note},
+            zone_id = ${data.zoneId}
           where id = ${data.id}
           returning id
         `;
@@ -1691,10 +1955,10 @@ export const saveRule = createServerFn({ method: "POST" })
       } else {
         await sql`
           insert into calendar_rules (
-            title, starts_at, ends_at, volume, wishes_enabled, explicit_filter, note, created_by
+            title, starts_at, ends_at, volume, wishes_enabled, explicit_filter, note, created_by, zone_id
           ) values (
             ${data.title}, ${data.startsAt}, ${data.endsAt}, ${data.volume},
-            ${data.wishesEnabled}, ${data.explicitFilter}, ${data.note}, ${context.userId}
+            ${data.wishesEnabled}, ${data.explicitFilter}, ${data.note}, ${context.userId}, ${data.zoneId}
           )
         `;
       }
@@ -1829,11 +2093,19 @@ export const importHouseLink = createServerFn({ method: "POST" })
     return { url, genre, asFallback: input?.asFallback === true };
   })
   .middleware([authMiddleware])
-  .handler(async ({ context, data }) => {
+  .handler(async ({ context, data }): Promise<HouseImport> => {
     const sql = await getSql();
     await requireAdmin(sql, context.userId);
     const loaded = await loadHouseSource(data.genre, data.url);
-    return withRadioLock(async () => {
+    const youtube = loaded.tracks.filter((track) => track.source === "youtube").length;
+    const preview = loaded.tracks.length - youtube;
+    const fromSpotify = Boolean(spotifyPlaylistId(data.url));
+    const note = fromSpotify
+      ? preview === 0
+        ? `${loaded.tracks.length} Titel von Spotify, alle über YouTube.`
+        : `${loaded.tracks.length} Titel von Spotify, ${youtube} über YouTube, ${preview} als 30-Sekunden-Vorschau.`
+      : `${loaded.tracks.length} Titel übernommen.`;
+    const snapshot = await withRadioLock(async () => {
       const found = await sql<Row>`select id from playlists where name = ${loaded.title} order by id asc limit 1`;
       let playlistId = asNum(found[0]?.id);
       if (!playlistId) {
@@ -1860,6 +2132,7 @@ export const importHouseLink = createServerFn({ method: "POST" })
       const admin = await loadAdmin(sql, context.userId);
       return { ...admin, settings: base };
     });
+    return { snapshot, note };
   });
 
 async function loadHouseSource(genreId: string, url: string): Promise<{ title: string; tracks: TrackInput[] }> {
@@ -2402,7 +2675,7 @@ export const startRelayNow = createServerFn({ method: "POST" })
   });
 
 type Links = {
-  spotify: { enabled: boolean; clientId: string; secret: string; detail: string };
+  spotify: { enabled: boolean; clientId: string; secret: string; refreshToken: string; accountName: string; detail: string };
   youtube: { enabled: boolean; key: string; detail: string };
   o365: { enabled: boolean; tenant: string; clientId: string; mailbox: string; secret: string; detail: string };
   piper: { enabled: boolean; voice: PiperVoiceId; endpoint: string; detail: string };
@@ -2432,6 +2705,16 @@ async function ensureServiceRows(sql: Sql) {
       on conflict (id) do nothing
     `;
   }
+  await sql`
+    update service_links set
+      enabled = true,
+      detail = ${"Suche ist an. Der Ton ist in jedem Browser derselbe. Das Konto verbindet die Regie einmal, ohne Passwort."}
+    where id = 'spotify'
+      and enabled = false
+      and coalesce(secret, '') = ''
+      and detail = 'Noch nicht verbunden.'
+      and config in ('{"clientId":""}', '{}')
+  `;
 }
 
 async function loadServices(sql: Sql): Promise<Links> {
@@ -2450,6 +2733,8 @@ async function loadServices(sql: Sql): Promise<Links> {
       enabled: asBool(spotify.enabled),
       clientId: clip(spotifyConfig.clientId, 80).replace(/[^\w-]/g, ""),
       secret: asText(spotify.secret),
+      refreshToken: clip(spotifyConfig.refreshToken, 512),
+      accountName: clip(spotifyConfig.accountName, 80),
       detail: asText(spotify.detail),
     },
     youtube: {
@@ -2480,6 +2765,7 @@ function publishServices(links: Links): ServiceState {
       enabled: links.spotify.enabled,
       clientId: links.spotify.clientId,
       secretSet: links.spotify.secret.length > 0,
+      accountName: links.spotify.accountName,
       detail: links.spotify.detail,
     },
     youtube: {
@@ -2527,9 +2813,10 @@ function piperEndpoint(value: string): string {
 
 async function loadPlan(sql: Sql): Promise<PlanBlock[]> {
   const rows = await sql<Row>`
-    select p.*, coalesce(s.name, '') as station_name
+    select p.*, coalesce(s.name, '') as station_name, coalesce(z.name, '') as zone_name
     from plan_blocks p
     left join relay_stations s on s.id = p.station_id
+    left join audio_zones z on z.id = p.zone_id
     where p.ends_at >= date_trunc('day', now())
       and p.starts_at < date_trunc('day', now()) + interval '2 days'
     order by p.starts_at asc, p.id asc
@@ -2556,6 +2843,8 @@ async function loadPlan(sql: Sql): Promise<PlanBlock[]> {
       talkPoints: asText(row.talk_points),
       stationId: row.station_id == null ? null : asNum(row.station_id),
       stationName: asText(row.station_name),
+      zoneId: row.zone_id == null ? null : asNum(row.zone_id),
+      zoneName: asText(row.zone_name),
       source: asText(row.source) === "o365" ? "o365" : "manual",
       active: startMs <= now && endMs >= now,
       past: endMs < now,
@@ -2674,6 +2963,7 @@ function parsePlan(input: unknown): PlanInput {
     djBrief: clip(o.djBrief, 1200),
     talkPoints: clip(o.talkPoints, 600),
     stationId,
+    zoneId: optionalZone(o.zoneId),
   };
 }
 
@@ -2753,10 +3043,16 @@ export const saveService = createServerFn({ method: "POST" })
       const current = await loadServices(sql);
       if (data.id === "spotify") {
         const secret = data.secret || current.spotify.secret;
+        const clientId = data.clientId.replace(/[^\w-]/g, "");
+        const sameApp = clientId === current.spotify.clientId;
         await sql`
           update service_links set
             enabled = ${data.enabled},
-            config = ${JSON.stringify({ clientId: data.clientId.replace(/[^\w-]/g, "") })},
+            config = ${JSON.stringify({
+              clientId,
+              refreshToken: sameApp ? current.spotify.refreshToken : "",
+              accountName: sameApp ? current.spotify.accountName : "",
+            })},
             secret = ${secret},
             updated_at = now()
           where id = 'spotify'
@@ -2806,9 +3102,18 @@ export const testService = createServerFn({ method: "POST" })
     let detail = "";
     try {
       if (data.id === "spotify") {
-        if (!links.spotify.clientId || !links.spotify.secret) fail("Client-ID und Geheimnis fehlen.");
-        await spotifyToken(links.spotify.clientId, links.spotify.secret);
-        detail = "Spotify nimmt die Zugangsdaten an.";
+        const token = await spotifyAccess(links.spotify);
+        if (token && links.spotify.accountName) {
+          detail = `Verbunden als ${links.spotify.accountName}. Die Sendung bleibt in allen Browsern gleich.`;
+        } else if (links.spotify.clientId && links.spotify.secret) {
+          await spotifyToken(links.spotify.clientId, links.spotify.secret);
+          detail = "Spotify nimmt die Zugangsdaten an. Das Konto selbst ist noch nicht verbunden.";
+        } else {
+          const hits = await searchSpotify("Nightcall", "", "");
+          detail = hits[0]
+            ? `Katalog antwortet, zum Beispiel „${hits[0].title}“. Dein Konto verbindet du mit der Client-ID, ohne Passwort.`
+            : "Keine Treffer.";
+        }
       } else if (data.id === "youtube") {
         const hits = await searchYoutube("Khruangbin", links.youtube.key);
         detail = hits[0] ? `YouTube antwortet. Zum Beispiel „${hits[0].title}“.` : "YouTube antwortet ohne Treffer.";
@@ -2888,6 +3193,7 @@ export const savePlan = createServerFn({ method: "POST" })
     return withRadioLock(async () => {
       const sql = await getSql();
       await requireAdmin(sql, context.userId);
+      await knownZone(sql, data.zoneId);
       if (data.stationId) {
         const found = await sql<Row>`select id from relay_stations where id = ${data.stationId}`;
         if (!found[0]) fail("Diesen Sender gibt es nicht.");
@@ -2907,7 +3213,8 @@ export const savePlan = createServerFn({ method: "POST" })
             mood = ${data.mood},
             dj_brief = ${data.djBrief},
             talk_points = ${data.talkPoints},
-            station_id = ${data.stationId}
+            station_id = ${data.stationId},
+            zone_id = ${data.zoneId}
           where id = ${data.id}
           returning id
         `;
@@ -2916,11 +3223,11 @@ export const savePlan = createServerFn({ method: "POST" })
         await sql`
           insert into plan_blocks (
             title, kind, starts_at, ends_at, volume, wishes_enabled, explicit_filter, energy,
-            wish_note, mood, dj_brief, talk_points, station_id, source, external_id, created_by
+            wish_note, mood, dj_brief, talk_points, station_id, zone_id, source, external_id, created_by
           ) values (
             ${data.title}, ${data.kind}, ${data.startsAt}, ${data.endsAt}, ${data.volume}, ${data.wishesEnabled},
             ${data.explicitFilter}, ${data.energy}, ${data.wishNote}, ${data.mood}, ${data.djBrief}, ${data.talkPoints},
-            ${data.stationId}, 'manual', '', ${context.userId}
+            ${data.stationId}, ${data.zoneId}, 'manual', '', ${context.userId}
           )
         `;
       }
@@ -2943,6 +3250,112 @@ export const deletePlan = createServerFn({ method: "POST" })
       return loadAdmin(sql, context.userId);
     });
   });
+
+export const saveBrand = createServerFn({ method: "POST" })
+  .validator((input: { companyName?: string; productName?: string; tagline?: string; signal?: string }) => {
+    const companyName = clip(input?.companyName, 40);
+    const productName = clip(input?.productName, 40);
+    const tagline = clip(input?.tagline, 90);
+    const raw = clip(input?.signal, 7).toLowerCase();
+    if (raw && !signalHex(raw)) fail("Signalfarbe als #rrggbb, zum Beispiel #2f9d86.");
+    return { companyName, productName, tagline, signal: raw };
+  })
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    await requireAdmin(sql, context.userId);
+    await sql`
+      update station_settings set
+        brand_company = ${data.companyName},
+        brand_product = ${data.productName},
+        brand_tagline = ${data.tagline},
+        brand_signal = ${data.signal}
+      where id = 1
+    `;
+    return loadAdmin(sql, context.userId);
+  });
+
+export const testPlaylist = createServerFn({ method: "POST" })
+  .validator((input: { id?: number }) => {
+    const id = asNum(input?.id);
+    if (!id) fail("Playlist fehlt.");
+    return { id };
+  })
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }): Promise<SourceProbe> => {
+    const sql = await getSql();
+    await requireAdmin(sql, context.userId);
+    const lists = await sql<Row>`select name from playlists where id = ${data.id}`;
+    if (!lists[0]) fail("Playlist nicht gefunden.");
+    const tracks = await sql<Row>`
+      select title, source, external_id, preview_url
+      from playlist_tracks
+      where playlist_id = ${data.id}
+      order by position asc, id asc
+      limit 3
+    `;
+    if (tracks.length === 0) return { ok: false, detail: "Die Playlist ist leer." };
+    const checks = await Promise.all(tracks.map((row) => probeTrack(row)));
+    const okCount = checks.filter((item) => item.ok).length;
+    const youtube = tracks.filter((row) => asText(row.source) === "youtube").length;
+    const kind = youtube === tracks.length ? "YouTube" : youtube > 0 ? "gemischt" : "Ton";
+    return {
+      ok: okCount === checks.length,
+      detail: `${okCount} von ${checks.length} geprüften Titeln erreichbar (${kind}). ${checks.map((item) => item.detail).join(" ")}`.trim(),
+    };
+  });
+
+export const testStation = createServerFn({ method: "POST" })
+  .validator((input: { id?: number }) => {
+    const id = asNum(input?.id);
+    if (!id) fail("Sender fehlt.");
+    return { id };
+  })
+  .middleware([authMiddleware])
+  .handler(async ({ context, data }): Promise<SourceProbe> => {
+    const sql = await getSql();
+    await requireAdmin(sql, context.userId);
+    const rows = await sql<Row>`select name, stream_url from relay_stations where id = ${data.id}`;
+    const row = rows[0];
+    if (!row) fail("Sender nicht gefunden.");
+    const probe = await probeUrl(asText(row.stream_url));
+    return { ok: probe.ok, detail: `${asText(row.name)}: ${probe.detail}` };
+  });
+
+async function probeTrack(row: Row): Promise<{ ok: boolean; detail: string }> {
+  const title = asText(row.title) || "Titel";
+  if (asText(row.source) === "youtube") {
+    const id = asText(row.external_id);
+    if (!/^[\w-]{6,20}$/.test(id)) return { ok: false, detail: `${title} hat keine YouTube-ID.` };
+    const probe = await probeUrl(`https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${id}`)}&format=json`);
+    return { ok: probe.ok, detail: probe.ok ? `${title} auf YouTube.` : `${title} nicht auf YouTube.` };
+  }
+  const preview = httpsUrl(row.preview_url);
+  if (!preview) return { ok: false, detail: `${title} ohne abspielbare Datei.` };
+  const probe = await probeUrl(preview);
+  return { ok: probe.ok, detail: probe.ok ? `${title} erreichbar.` : `${title} nicht erreichbar.` };
+}
+
+async function probeUrl(url: string): Promise<{ ok: boolean; detail: string }> {
+  if (!url.startsWith("https://")) return { ok: false, detail: "Nur https-Adressen." };
+  try {
+    let res = await fetch(url, {
+      method: "GET",
+      headers: { range: "bytes=0-1" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(6000),
+    });
+    if (res.status === 405 || res.status === 501) {
+      res = await fetch(url, { method: "HEAD", redirect: "follow", signal: AbortSignal.timeout(6000) });
+    }
+    const type = (res.headers.get("content-type") ?? "").split(";")[0]?.trim() ?? "";
+    const ok = res.ok || res.status === 206;
+    if (!ok) return { ok: false, detail: `Antwort ${res.status}.` };
+    return { ok: true, detail: type ? `Erreichbar, ${type}.` : "Erreichbar." };
+  } catch {
+    return { ok: false, detail: "Keine Antwort." };
+  }
+}
 
 export const createMember = createServerFn({ method: "POST" })
   .validator((input: { name?: string; email?: string; password?: string; role?: string }) => {

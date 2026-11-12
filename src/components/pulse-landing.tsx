@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "@tanstack/react-router";
-import { brand } from "@/brand";
+import { useLiveBrand } from "@/components/pulse-brand";
 import { GROK_PROVIDERS, authClient, signIn } from "@/lib/auth/client";
 import { emailAndPasswordEnabled } from "@/lib/auth/email-password";
 import { Button, Field, Mark, Panel, fieldClass } from "@/components/pulse-ui";
@@ -12,18 +12,19 @@ const points = [
 ];
 
 export function StudioIntro({ children }: { children: React.ReactNode }) {
+  const live = useLiveBrand();
   return (
-    <main className="mx-auto grid min-h-screen w-full max-w-6xl items-center gap-8 px-4 py-6 sm:px-6 lg:grid-cols-2 lg:gap-10 lg:py-12">
+    <main className="mx-auto grid min-h-screen w-full items-center gap-8 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,28rem)] lg:gap-16 lg:px-10 lg:py-12">
       <div className="rise order-2 grid gap-6 lg:order-1 lg:gap-8">
         <div className="flex items-center gap-3 text-signal">
           <Mark className="h-9 w-9" />
-          <p className="text-sm font-medium tracking-wide text-muted">{brand.companyName} Mitarbeiter-Radio</p>
+          <p className="text-sm font-medium tracking-wide text-muted">{live.companyName} Mitarbeiter-Radio</p>
         </div>
         <div className="grid gap-4">
           <h1 className="font-display text-5xl leading-none tracking-tight text-ink sm:text-6xl">
-            {brand.productName}
+            {live.productName}
           </h1>
-          <p className="max-w-md text-lg text-muted">{brand.tagline}. Eine Sendung, eine Queue, jedes Gerät hört dasselbe.</p>
+          <p className="max-w-md text-lg text-muted">{live.tagline}. Eine Sendung, eine Queue, jedes Gerät hört dasselbe.</p>
         </div>
         <ul className="grid gap-4">
           {points.map((point) => (
@@ -154,7 +155,7 @@ export function AuthCard() {
                 {error}
               </p>
             ) : null}
-            <Button type="submit" disabled={pending}>
+            <Button type="submit" className="w-full" disabled={pending}>
               {pending ? "Einen Moment" : mode === "up" ? "Konto erstellen" : "Anmelden"}
             </Button>
             <button
@@ -165,19 +166,20 @@ export function AuthCard() {
                 setError("");
               }}
             >
-              {mode === "up" ? "Ich habe schon ein Konto" : "Noch kein Konto"}
+              {mode === "up" ? "Ich habe schon ein Konto" : "Noch kein Konto? Konto anlegen"}
             </button>
           </form>
         ) : null}
         <div className="grid gap-2">
-          {emailAndPasswordEnabled ? <p className="text-xs text-subtle">oder</p> : null}
-          <Button variant="line" onClick={() => window.location.assign("/api/microsoft/start")}>
+          {emailAndPasswordEnabled ? <p className="text-center text-xs text-subtle">oder</p> : null}
+          <Button variant="line" className="w-full" onClick={() => window.location.assign("/api/microsoft/start")}>
             Mit Microsoft anmelden
           </Button>
           {GROK_PROVIDERS.map((provider) => (
             <Button
               key={provider.providerId}
               variant="line"
+              className="w-full"
               onClick={() => void signIn(provider.providerId, { callbackURL: "/" })}
             >
               Weiter mit {provider.label}

@@ -2,6 +2,8 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { HOUSE_GENRES, type FilterMode } from "@/lib/pulse/logic";
+import { brand, signalHex } from "@/brand";
+import { publishBrand } from "@/components/pulse-brand";
 import {
   addPlaylistTrack,
   checkOutput,
@@ -15,6 +17,7 @@ import {
   airPiper,
   importHouseLink,
   removePlaylistTrack,
+  saveBrand,
   saveRelaySlot,
   saveRule,
   saveSettings,
@@ -22,6 +25,8 @@ import {
   searchMusic,
   setFallback,
   pruneWishes,
+  testPlaylist,
+  testStation,
 } from "@/lib/pulse/api";
 import type { AdminSnapshot, OutputProbe, PlaylistRecord, SettingsRecord, TrackInput } from "@/lib/pulse/types";
 import { Button, Field, Panel, Segment, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
@@ -29,6 +34,8 @@ import { GuidePanel } from "@/components/pulse-guide";
 import { RegieBoard, StudioChrome, type RegieSection } from "@/components/pulse-nav";
 import { MusicPlan } from "@/components/pulse-plan";
 import { ServicesDesk } from "@/components/pulse-services";
+import { AreasDesk, DebugDesk } from "@/components/pulse-areas";
+import { RoomListen } from "@/components/pulse-listen";
 import { UsersDesk } from "@/components/pulse-users";
 import { cn } from "@/lib/utils";
 
@@ -54,8 +61,8 @@ export function AdminDesk() {
 
   return (
     <div className="flex min-h-screen w-full flex-col">
-      <StudioChrome room="regie" role="admin" />
-      <main className="pb-chrome mx-auto grid w-full min-w-0 max-w-5xl grid-cols-1 gap-4 px-4 py-6 sm:px-6">
+      <StudioChrome room="regie" role={data ? "admin" : null} wide />
+      <main className="pb-chrome mx-auto grid w-full min-w-0 grid-cols-1 gap-4 px-4 py-6 sm:px-6 lg:px-8">
         <p className="max-w-2xl text-sm text-muted">
           Ton, Tag, Quellen und Haus. Ein Zeitfenster überschreibt Lautstärke und Wünsche nur, solange es läuft.
         </p>
@@ -68,11 +75,19 @@ export function AdminDesk() {
         {data ? (
           <>
             <GuidePanel role="admin" />
+            <section className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3 sm:px-5">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-ink">Regieton</p>
+                <p className="text-xs text-subtle">Nur dieser Bildschirm. Sonos und Receiver laufen davon unabhängig weiter.</p>
+              </div>
+              <RoomListen room="regie" />
+            </section>
             <RegieBoard section={section} onChange={setSection} />
             <div key={section} className="rise">
               {section === "ausgabe" ? (
                 <OutputForm initial={data.settings} suggested={data.suggestedReceiver} onSaved={setData} />
               ) : null}
+              {section === "bereiche" ? <AreasDesk /> : null}
               {section === "programm" ? <ProgramForm initial={data.settings} onSaved={setData} /> : null}
               {section === "musikplan" ? <MusicPlan data={data} onSaved={setData} /> : null}
               {section === "kalender" ? <Calendar data={data} onSaved={setData} /> : null}
@@ -81,6 +96,8 @@ export function AdminDesk() {
               {section === "playlists" ? <Playlists data={data} onSaved={setData} /> : null}
               {section === "moderation" ? <Moderation data={data} onSaved={setData} /> : null}
               {section === "nutzer" ? <UsersDesk data={data} onSaved={setData} /> : null}
+              {section === "debug" ? <DebugDesk /> : null}
+              {section === "marke" ? <BrandDesk data={data} onSaved={setData} /> : null}
             </div>
           </>
         ) : null}
@@ -117,7 +134,7 @@ function OutputForm({
 
   return (
     <Panel title="Wohin der Ton geht">
-      <div className="grid gap-4">
+      <div className="desk-form grid gap-4">
         <Segment
           label="Ausgabe"
           value={form.outputTarget}
@@ -225,7 +242,7 @@ function ProgramForm({ initial, onSaved }: { initial: SettingsRecord; onSaved: (
   return (
     <Panel title="Was laufen darf">
       <form
-        className="grid gap-4"
+        className="desk-form grid gap-4"
         onSubmit={(event) => {
           event.preventDefault();
           setPending(true);
@@ -247,17 +264,16 @@ function ProgramForm({ initial, onSaved }: { initial: SettingsRecord; onSaved: (
           />
           Wünsche annehmen
         </label>
-        <Field label="Filter">
-          <select
-            className={fieldClass}
-            value={form.explicitFilter}
-            onChange={(event) => setForm({ ...form, explicitFilter: event.target.value as FilterMode })}
-          >
-            <option value="allow">Alles</option>
-            <option value="clean">Explicit-Markierung sperren</option>
-            <option value="strict">Streng, inklusive Begriffsliste</option>
-          </select>
-        </Field>
+        <Segment
+          label="Filter"
+          value={form.explicitFilter}
+          onChange={(explicitFilter) => setForm({ ...form, explicitFilter })}
+          options={[
+            { id: "allow", label: "Alles" },
+            { id: "clean", label: "Gefiltert" },
+            { id: "strict", label: "Streng" },
+          ]}
+        />
         <Field
           label="Zusätzliche Sperrwörter"
           hint="Komma oder Zeile. Der strenge Filter nutzt sie zusammen mit einer festen Basisliste."
@@ -278,16 +294,15 @@ function ProgramForm({ initial, onSaved }: { initial: SettingsRecord; onSaved: (
             onChange={(event) => setForm({ ...form, downvoteKick: Number(event.target.value) })}
           />
         </Field>
-        <Field label="Volle Queue">
-          <select
-            className={fieldClass}
-            value={form.wishPrune}
-            onChange={(event) => setForm({ ...form, wishPrune: event.target.value === "off" ? "off" : "auto" })}
-          >
-            <option value="auto">Schwache Wünsche automatisch raus</option>
-            <option value="off">Nichts automatisch entfernen</option>
-          </select>
-        </Field>
+        <Segment
+          label="Volle Queue"
+          value={form.wishPrune}
+          onChange={(wishPrune) => setForm({ ...form, wishPrune })}
+          options={[
+            { id: "auto", label: "Schwache raus" },
+            { id: "off", label: "Behalten" },
+          ]}
+        />
         {form.wishPrune === "auto" ? (
           <Field
             label="Ab so vielen Wünschen"
@@ -360,13 +375,17 @@ function Calendar({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: Admi
   const [wishes, setWishes] = useState<"keep" | "on" | "off">("off");
   const [filter, setFilter] = useState<"keep" | FilterMode>("strict");
   const [note, setNote] = useState("Offizielle Veranstaltung");
+  const [zoneId, setZoneId] = useState(0);
   const [pending, setPending] = useState(false);
 
   return (
     <div className="grid gap-4">
       <Panel title="Zeitfenster">
+        <p className="mb-4 max-w-3xl text-sm text-muted">
+          Fürs ganze Haus ändert das die Sendung. Ein Bereich ändert nur Lautstärke und Wünsche an den Geräten dort.
+        </p>
         <form
-          className="grid gap-3"
+          className="desk-form grid gap-3"
           onSubmit={(event) => {
             event.preventDefault();
             setPending(true);
@@ -379,6 +398,7 @@ function Calendar({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: Admi
                 wishesEnabled: wishes === "keep" ? null : wishes === "on",
                 explicitFilter: filter === "keep" ? null : filter,
                 note,
+                zoneId: zoneId || null,
               },
             })
               .then((next) => {
@@ -391,6 +411,16 @@ function Calendar({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: Admi
         >
           <Field label="Name">
             <input className={fieldClass} value={title} onChange={(event) => setTitle(event.target.value)} />
+          </Field>
+          <Field label="Bereich" hint="Ganzes Haus gilt für alle. Ein Bereich nur für die Geräte darin.">
+            <select className={fieldClass} value={zoneId} onChange={(event) => setZoneId(Number(event.target.value))}>
+              <option value={0}>Ganzes Haus</option>
+              {data.zones.map((zone) => (
+                <option key={zone.id} value={zone.id}>
+                  {zone.name}
+                </option>
+              ))}
+            </select>
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Beginn">
@@ -440,6 +470,8 @@ function Calendar({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: Admi
                 </p>
                 <p className="text-sm text-muted">
                   {formatWhen(rule.startsAt)} – {formatWhen(rule.endsAt)}
+                  {" · "}
+                  {rule.zoneId == null ? "Ganzes Haus" : rule.zoneName || "Bereich fehlt"}
                   {rule.volume != null ? ` · ${rule.volume}` : ""}
                   {rule.wishesEnabled === false ? " · Wünsche aus" : ""}
                   {rule.wishesEnabled === true ? " · Wünsche an" : ""}
@@ -479,11 +511,12 @@ function Playlists({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: Adm
     }
   }, [data.playlists, target]);
 
-  function run(id: string, task: Promise<AdminSnapshot>) {
+  function take(id: string, payload: { url?: string; genre?: string; asFallback?: boolean }) {
     setPending(id);
-    void task
-      .then((next) => {
-        onSaved(next);
+    void importHouseLink({ data: payload })
+      .then((result) => {
+        onSaved(result.snapshot);
+        toast.success(result.note);
         if (id === "link") setLink("");
       })
       .catch((caught) => toast.error(errorText(caught)))
@@ -494,8 +527,8 @@ function Playlists({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: Adm
     <div className="grid gap-4">
       <Panel title="Standardmusik">
         <p className="mb-4 text-sm text-muted">
-          Ohne Wünsche läuft die markierte Playlist. Chill, Pop Charts, Fokus und Jazz sind YouTube-Playlists. Ein
-          Spotify- oder YouTube-Link hängt dieselbe Liste hier an. YouTube spielt im Browser und auf der Receiver-Seite.
+          Ohne Wünsche läuft die markierte Playlist. Ein Spotify-Link wird Titel für Titel nach YouTube übersetzt. Was
+          YouTube nicht hergibt, bleibt eine 30-Sekunden-Vorschau. YouTube-Links bleiben YouTube.
         </p>
         <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {HOUSE_GENRES.map((genre) => (
@@ -503,20 +536,20 @@ function Playlists({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: Adm
               key={genre.id}
               variant="line"
               disabled={pending !== ""}
-              onClick={() => run(genre.id, importHouseLink({ data: { genre: genre.id } }))}
+              onClick={() => take(genre.id, { genre: genre.id })}
             >
               {pending === genre.id ? "Lädt…" : genre.name}
             </Button>
           ))}
         </div>
-        <form
-          className="grid gap-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            run("link", importHouseLink({ data: { url: link, asFallback } }));
-          }}
-        >
-          <Field label="Playlist-Link" hint="open.spotify.com/playlist/… oder youtube.com/playlist?list=…">
+          <form
+            className="desk-form grid gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              take("link", { url: link, asFallback });
+            }}
+          >
+          <Field label="Playlist-Link" hint="Spotify wird nach YouTube gewandelt. youtube.com/playlist?list=… bleibt YouTube.">
             <input className={fieldClass} value={link} onChange={(event) => setLink(event.target.value)} placeholder="Link einfügen" />
           </Field>
           <label className="flex items-center gap-3 text-sm">
@@ -604,11 +637,31 @@ function Playlists({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: Adm
 
 function PlaylistCard({ list, onSaved }: { list: PlaylistRecord; onSaved: (next: AdminSnapshot) => void }) {
   const [confirm, setConfirm] = useState(false);
+  const [probe, setProbe] = useState("");
   return (
     <article className="rounded-lg border border-line p-3">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-medium">{list.name}</h3>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="line"
+            onClick={() => {
+              setProbe("Prüft…");
+              void testPlaylist({ data: { id: list.id } })
+                .then((result) => {
+                  setProbe(result.detail);
+                  if (result.ok) toast.success(result.detail);
+                  else toast.error(result.detail);
+                })
+                .catch((caught) => {
+                  const text = errorText(caught);
+                  setProbe(text);
+                  toast.error(text);
+                });
+            }}
+          >
+            Testen
+          </Button>
           {list.isFallback ? (
             <span className="inline-flex h-11 items-center text-sm text-ok">läuft ohne Wünsche</span>
           ) : (
@@ -621,6 +674,7 @@ function PlaylistCard({ list, onSaved }: { list: PlaylistRecord; onSaved: (next:
           </Button>
         </div>
       </div>
+      {probe ? <p className="mb-2 text-sm text-muted">{probe}</p> : null}
       <ul className="grid min-w-0 grid-cols-1 gap-1">
         {list.tracks.length === 0 ? <li className="text-sm text-subtle">Noch leer.</li> : null}
         {list.tracks.map((track) => (
@@ -782,7 +836,7 @@ function Stations({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: Admi
       <Panel title="Echte Sender">
         <p className="mb-4 text-sm text-muted">Öffentliche https-Streams. YouTube spielt nicht auf Sonos, aber auf der Receiver-Seite.</p>
         <form
-          className="grid gap-3"
+          className="desk-form grid gap-3"
           onSubmit={(event) => {
             event.preventDefault();
             void saveStation({ data: { name, streamUrl, note } })
@@ -822,23 +876,35 @@ function Stations({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: Admi
                 <p className="font-medium">{station.name}</p>
                 <p className="truncate text-sm text-muted">{station.note || station.streamUrl}</p>
               </div>
-              <Button
-                variant="danger"
-                onClick={() => {
-                  void deleteStation({ data: { id: station.id } })
-                    .then(onSaved)
-                    .catch((caught) => toast.error(errorText(caught)));
-                }}
-              >
-                Entfernen
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="line"
+                  onClick={() => {
+                    void testStation({ data: { id: station.id } })
+                      .then((result) => (result.ok ? toast.success(result.detail) : toast.error(result.detail)))
+                      .catch((caught) => toast.error(errorText(caught)));
+                  }}
+                >
+                  Testen
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    void deleteStation({ data: { id: station.id } })
+                      .then(onSaved)
+                      .catch((caught) => toast.error(errorText(caught)));
+                  }}
+                >
+                  Entfernen
+                </Button>
+              </div>
             </li>
           ))}
         </ul>
       </Panel>
       <Panel title="Zeitplan">
         <form
-          className="grid gap-3"
+          className="desk-form grid gap-3"
           onSubmit={(event) => {
             event.preventDefault();
             void saveRelaySlot({
@@ -908,6 +974,88 @@ function Stations({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: Admi
         </ul>
       </Panel>
     </div>
+  );
+}
+
+function BrandDesk({ data, onSaved }: { data: AdminSnapshot; onSaved: (next: AdminSnapshot) => void }) {
+  const stored = data.brand;
+  const [companyName, setCompanyName] = useState(stored.companyName);
+  const [productName, setProductName] = useState(stored.productName);
+  const [tagline, setTagline] = useState(stored.tagline);
+  const [signal, setSignal] = useState(stored.signal || brand.colors.signal);
+  const [pending, setPending] = useState(false);
+  const preview = signalHex(signal) ?? brand.colors.signal;
+
+  return (
+    <Panel title="Marke">
+      <p className="mb-4 max-w-3xl text-sm text-muted">
+        Name, Produkt und Signalfarbe gelten für Anmeldung und Kopfzeile. Leer lassen stellt die mitgelieferte CI wieder her.
+        Schriften bleiben Fraunces und Outfit.
+      </p>
+      <form
+        className="desk-form grid gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setPending(true);
+          const nextSignal = signalHex(signal) ?? "";
+          void saveBrand({
+            data: { companyName, productName, tagline, signal: stored.signal === "" && signal === brand.colors.signal ? "" : nextSignal },
+          })
+            .then((next) => {
+              onSaved(next);
+              publishBrand({
+                companyName: companyName.trim() || brand.companyName,
+                productName: productName.trim() || brand.productName,
+                tagline: tagline.trim() || brand.tagline,
+                signal: nextSignal || brand.colors.signal,
+                signalInk: "",
+              });
+              toast.success("Marke liegt an.");
+            })
+            .catch((caught) => toast.error(errorText(caught)))
+            .finally(() => setPending(false));
+        }}
+      >
+        <Field label="Firma" hint={`Leer bleibt ${brand.companyName}.`}>
+          <input className={fieldClass} value={companyName} onChange={(event) => setCompanyName(event.target.value)} placeholder={brand.companyName} />
+        </Field>
+        <Field label="Produkt" hint={`Leer bleibt ${brand.productName}.`}>
+          <input className={fieldClass} value={productName} onChange={(event) => setProductName(event.target.value)} placeholder={brand.productName} />
+        </Field>
+        <Field label="Satz" hint={`Leer bleibt „${brand.tagline}“.`}>
+          <input className={fieldClass} value={tagline} onChange={(event) => setTagline(event.target.value)} placeholder={brand.tagline} />
+        </Field>
+        <Field label="Signalfarbe" hint="Buttons und die aktive Markierung.">
+          <div className="flex items-center gap-3">
+            <input
+              type="color"
+              aria-label="Signalfarbe"
+              className="h-11 w-14 cursor-pointer rounded-md border border-line bg-surface-2"
+              value={preview}
+              onChange={(event) => setSignal(event.target.value)}
+            />
+            <input className={fieldClass} value={signal} onChange={(event) => setSignal(event.target.value)} placeholder="#2f9d86" />
+          </div>
+        </Field>
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" disabled={pending}>
+            Marke speichern
+          </Button>
+          <Button
+            type="button"
+            variant="line"
+            onClick={() => {
+              setCompanyName("");
+              setProductName("");
+              setTagline("");
+              setSignal("");
+            }}
+          >
+            Standard
+          </Button>
+        </div>
+      </form>
+    </Panel>
   );
 }
 

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { deletePlan, importOutlook, savePlan } from "@/lib/pulse/api";
 import { VOLUME_WISHES, type FilterMode, type PlanEnergy, type PlanKind } from "@/lib/pulse/logic";
-import type { AdminSnapshot, PlanBlock, PlanInput, RelayStation } from "@/lib/pulse/types";
+import type { AdminSnapshot, AudioZone, PlanBlock, PlanInput, RelayStation } from "@/lib/pulse/types";
 import { Button, Field, Panel, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
 import { cn } from "@/lib/utils";
 
@@ -25,14 +25,35 @@ export function MusicPlan({
 }) {
   const [editing, setEditing] = useState<PlanBlock | null>(null);
   const [ics, setIcs] = useState("");
-  const blocks = data.plan;
+  const [focus, setFocus] = useState<"all" | "house" | number>("all");
+  const blocks = data.plan.filter((block) => {
+    if (focus === "all") return true;
+    if (focus === "house") return block.zoneId == null;
+    return block.zoneId === focus;
+  });
 
   return (
     <div className="grid gap-4">
       <Panel title="Tag auf einen Blick">
         <p className="mb-4 text-sm text-muted">
-          Lautstärke, Wünsche und Energie gelten, solange der Block läuft. Danach wieder die Normalwerte.
+          Blöcke fürs ganze Haus steuern die Sendung. Ein Bereich ändert nur Lautstärke und Wünsche an den Geräten dort.
+          Die Queue bleibt eine.
         </p>
+        {data.zones.length > 0 ? (
+          <div className="mb-4 flex flex-wrap gap-2">
+            <FilterChip pressed={focus === "all"} onClick={() => setFocus("all")}>
+              Alle
+            </FilterChip>
+            <FilterChip pressed={focus === "house"} onClick={() => setFocus("house")}>
+              Ganzes Haus
+            </FilterChip>
+            {data.zones.map((zone) => (
+              <FilterChip key={zone.id} pressed={focus === zone.id} onClick={() => setFocus(zone.id)}>
+                {zone.name}
+              </FilterChip>
+            ))}
+          </div>
+        ) : null}
         <DayStrip blocks={blocks} />
         {blocks.length === 0 ? <p className="mt-4 text-sm text-muted">Heute liegt noch nichts im Plan.</p> : null}
         <ul className="mt-4 grid gap-3">
@@ -49,6 +70,8 @@ export function MusicPlan({
                     {formatWhen(block.startsAt)} – {formatWhen(block.endsAt)}
                     {" · "}
                     {kindLabel(block.kind)}
+                    {" · "}
+                    {zoneLabel(block)}
                     {block.volume != null ? ` · ${block.volume}` : " · Lautstärke normal"}
                     {block.wishesEnabled === false ? " · Wünsche aus" : ""}
                     {block.wishesEnabled === true ? " · Wünsche an" : ""}
@@ -80,6 +103,7 @@ export function MusicPlan({
       <PlanForm
         key={editing?.id ?? "neu"}
         stations={data.stations}
+        zones={data.zones}
         initial={editing}
         onCancel={() => setEditing(null)}
         onSaved={(next) => {
@@ -185,6 +209,7 @@ function RundownCard({ block, label, dim }: { block: PlanBlock; label: string; d
         {formatWhen(block.startsAt)} – {formatWhen(block.endsAt)}
         {" · "}
         {kindLabel(block.kind)}
+        {block.zoneId != null ? ` · ${zoneLabel(block)}` : ""}
         {block.stationName ? ` · ${block.stationName}` : ""}
         {block.source === "o365" ? " · Outlook" : ""}
       </p>
@@ -227,42 +252,108 @@ function RundownCard({ block, label, dim }: { block: PlanBlock; label: string; d
 function DayStrip({ blocks }: { blocks: PlanBlock[] }) {
   const start = dayStart();
   const span = 14 * 60 * 60 * 1000;
+  const sorted = [...blocks].sort(
+    (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime() || a.id - b.id,
+  );
+  const laneEnds: number[] = [];
+  const placed = sorted.map((block) => {
+    const left = clamp01((new Date(block.startsAt).getTime() - start) / span);
+    const right = Math.max(left, clamp01((new Date(block.endsAt).getTime() - start) / span));
+    let lane = laneEnds.findIndex((end) => left >= end - 0.002);
+    if (lane < 0) {
+      lane = laneEnds.length;
+      laneEnds.push(right);
+    } else {
+      laneEnds[lane] = right;
+    }
+    return { block, left, right, lane };
+  });
+  const lanes = Math.max(1, laneEnds.length);
   return (
-    <div className="min-w-0 overflow-hidden rounded-md">
-      <div className="relative h-20 w-full rounded-md bg-canvas">
-        {blocks.map((block) => {
-          const left = Math.max(0, Math.min(1, (new Date(block.startsAt).getTime() - start) / span));
-          const right = Math.max(left, Math.min(1, (new Date(block.endsAt).getTime() - start) / span));
-          const width = Math.max(0.04, right - left);
-          return (
-            <div
-              key={block.id}
-              className={cn(
-                "absolute top-3 flex h-14 items-center overflow-hidden rounded-md px-2 text-xs",
-                block.active ? "bg-signal text-signal-ink" : "bg-surface-2 text-ink",
-              )}
-              style={{ left: `${left * 100}%`, width: `${width * 100}%` }}
-              title={block.wishNote || block.title}
-            >
-              <span className="truncate">
-                {block.title}
-                {block.volume != null ? ` ${block.volume}` : ""}
-              </span>
-            </div>
-          );
-        })}
+    <div className="min-w-0">
+      <div className="mb-2 flex justify-between px-1 text-xs tabular-nums text-subtle">
+        <span>7:00</span>
+        <span>10:30</span>
+        <span>14:00</span>
+        <span>17:30</span>
+        <span>21:00</span>
+      </div>
+      <div className="grid gap-1.5 rounded-md bg-canvas p-2">
+        {Array.from({ length: lanes }, (_, lane) => (
+          <div key={lane} className="relative h-10">
+            {placed
+              .filter((item) => item.lane === lane)
+              .map((item) => {
+                const next = placed
+                  .filter((other) => other.lane === lane && other.left > item.left + 0.001)
+                  .sort((a, b) => a.left - b.left)[0];
+                const room = (next?.left ?? 1) - item.left;
+                const width = Math.max(0.012, Math.min(room, Math.max(item.right - item.left, Math.min(0.055, room))));
+                const label = `${item.block.title}${item.block.volume != null ? ` ${item.block.volume}` : ""}`;
+                return (
+                  <div
+                    key={item.block.id}
+                    className={cn(
+                      "absolute top-0 flex h-10 items-center overflow-hidden rounded-md px-2 text-xs",
+                      item.block.active ? "bg-signal text-signal-ink" : "bg-surface-2 text-ink",
+                    )}
+                    style={{ left: `${item.left * 100}%`, width: `${width * 100}%` }}
+                    title={`${label} · ${zoneLabel(item.block)}`}
+                  >
+                    {width >= 0.045 ? <span className="truncate">{label}</span> : <span className="sr-only">{label}</span>}
+                  </div>
+                );
+              })}
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
+function zoneLabel(block: PlanBlock): string {
+  if (block.zoneId == null) return "Ganzes Haus";
+  return block.zoneName || "Bereich fehlt";
+}
+
+function FilterChip({
+  pressed,
+  onClick,
+  children,
+}: {
+  pressed: boolean;
+  onClick: () => void;
+  children: string;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={onClick}
+      className={cn(
+        "h-9 rounded-md px-3 text-sm",
+        pressed ? "bg-signal text-signal-ink" : "bg-surface-2 text-muted",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
 function PlanForm({
   stations,
+  zones,
   initial,
   onSaved,
   onCancel,
 }: {
   stations: RelayStation[];
+  zones: AudioZone[];
   initial: PlanBlock | null;
   onSaved: (next: AdminSnapshot) => void;
   onCancel: () => void;
@@ -282,13 +373,14 @@ function PlanForm({
     djBrief: initial?.djBrief ?? "",
     talkPoints: initial?.talkPoints ?? "",
     stationId: initial?.stationId ?? null,
+    zoneId: initial?.zoneId ?? null,
   });
   const [pending, setPending] = useState(false);
 
   return (
     <Panel title={initial ? "Block ändern" : "Block anlegen"}>
       <form
-        className="grid gap-3"
+        className="desk-form grid gap-3"
         onSubmit={(event) => {
           event.preventDefault();
           setPending(true);
@@ -322,6 +414,20 @@ function PlanForm({
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Name">
             <input className={fieldClass} value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} />
+          </Field>
+          <Field label="Bereich" hint="Ganzes Haus gilt für die Sendung. Ein Bereich nur für Lautstärke und Wünsche dort.">
+            <select
+              className={fieldClass}
+              value={form.zoneId ?? 0}
+              onChange={(event) => setForm({ ...form, zoneId: Number(event.target.value) || null })}
+            >
+              <option value={0}>Ganzes Haus</option>
+              {zones.map((zone) => (
+                <option key={zone.id} value={zone.id}>
+                  {zone.name}
+                </option>
+              ))}
+            </select>
           </Field>
           <Field label="Art">
             <select

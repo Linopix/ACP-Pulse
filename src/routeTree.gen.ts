@@ -13,9 +13,12 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as DjRouteImport } from './routes/dj'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as ApiBrandRouteImport } from './routes/api/brand'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiMicrosoftCallbackRouteImport } from './routes/api/microsoft/callback'
 import { Route as ApiMicrosoftStartRouteImport } from './routes/api/microsoft/start'
+import { Route as ApiSpotifyCallbackRouteImport } from './routes/api/spotify/callback'
+import { Route as ApiSpotifyStartRouteImport } from './routes/api/spotify/start'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -37,6 +40,11 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiBrandRoute = ApiBrandRouteImport.update({
+  id: '/api/brand',
+  path: '/api/brand',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -52,24 +60,40 @@ const ApiMicrosoftStartRoute = ApiMicrosoftStartRouteImport.update({
   path: '/api/microsoft/start',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSpotifyCallbackRoute = ApiSpotifyCallbackRouteImport.update({
+  id: '/api/spotify/callback',
+  path: '/api/spotify/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSpotifyStartRoute = ApiSpotifyStartRouteImport.update({
+  id: '/api/spotify/start',
+  path: '/api/spotify/start',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/dj': typeof DjRoute
   '/login': typeof LoginRoute
+  '/api/brand': typeof ApiBrandRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/microsoft/callback': typeof ApiMicrosoftCallbackRoute
   '/api/microsoft/start': typeof ApiMicrosoftStartRoute
+  '/api/spotify/callback': typeof ApiSpotifyCallbackRoute
+  '/api/spotify/start': typeof ApiSpotifyStartRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/dj': typeof DjRoute
   '/login': typeof LoginRoute
+  '/api/brand': typeof ApiBrandRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/microsoft/callback': typeof ApiMicrosoftCallbackRoute
   '/api/microsoft/start': typeof ApiMicrosoftStartRoute
+  '/api/spotify/callback': typeof ApiSpotifyCallbackRoute
+  '/api/spotify/start': typeof ApiSpotifyStartRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -77,9 +101,12 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/dj': typeof DjRoute
   '/login': typeof LoginRoute
+  '/api/brand': typeof ApiBrandRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/microsoft/callback': typeof ApiMicrosoftCallbackRoute
   '/api/microsoft/start': typeof ApiMicrosoftStartRoute
+  '/api/spotify/callback': typeof ApiSpotifyCallbackRoute
+  '/api/spotify/start': typeof ApiSpotifyStartRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -88,27 +115,36 @@ export interface FileRouteTypes {
     | '/admin'
     | '/dj'
     | '/login'
+    | '/api/brand'
     | '/api/auth/$'
     | '/api/microsoft/callback'
     | '/api/microsoft/start'
+    | '/api/spotify/callback'
+    | '/api/spotify/start'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/admin'
     | '/dj'
     | '/login'
+    | '/api/brand'
     | '/api/auth/$'
     | '/api/microsoft/callback'
     | '/api/microsoft/start'
+    | '/api/spotify/callback'
+    | '/api/spotify/start'
   id:
     | '__root__'
     | '/'
     | '/admin'
     | '/dj'
     | '/login'
+    | '/api/brand'
     | '/api/auth/$'
     | '/api/microsoft/callback'
     | '/api/microsoft/start'
+    | '/api/spotify/callback'
+    | '/api/spotify/start'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -116,9 +152,12 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   DjRoute: typeof DjRoute
   LoginRoute: typeof LoginRoute
+  ApiBrandRoute: typeof ApiBrandRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiMicrosoftCallbackRoute: typeof ApiMicrosoftCallbackRoute
   ApiMicrosoftStartRoute: typeof ApiMicrosoftStartRoute
+  ApiSpotifyCallbackRoute: typeof ApiSpotifyCallbackRoute
+  ApiSpotifyStartRoute: typeof ApiSpotifyStartRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -151,6 +190,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/brand': {
+      id: '/api/brand'
+      path: '/api/brand'
+      fullPath: '/api/brand'
+      preLoaderRoute: typeof ApiBrandRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -172,6 +218,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMicrosoftStartRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/spotify/callback': {
+      id: '/api/spotify/callback'
+      path: '/api/spotify/callback'
+      fullPath: '/api/spotify/callback'
+      preLoaderRoute: typeof ApiSpotifyCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/spotify/start': {
+      id: '/api/spotify/start'
+      path: '/api/spotify/start'
+      fullPath: '/api/spotify/start'
+      preLoaderRoute: typeof ApiSpotifyStartRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -180,9 +240,12 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   DjRoute: DjRoute,
   LoginRoute: LoginRoute,
+  ApiBrandRoute: ApiBrandRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiMicrosoftCallbackRoute: ApiMicrosoftCallbackRoute,
   ApiMicrosoftStartRoute: ApiMicrosoftStartRoute,
+  ApiSpotifyCallbackRoute: ApiSpotifyCallbackRoute,
+  ApiSpotifyStartRoute: ApiSpotifyStartRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -5,7 +5,7 @@ import { UserButton } from "@/lib/auth/gates";
 import { isDesk, type DeskRole } from "@/lib/pulse/logic";
 import { GuideButton } from "@/components/pulse-guide";
 import { Mark, clockLabel } from "@/components/pulse-ui";
-import { brand } from "@/brand";
+import { useLiveBrand } from "@/components/pulse-brand";
 import { cn } from "@/lib/utils";
 
 export type RoomId = "sendung" | "pult" | "regie";
@@ -25,22 +25,22 @@ function roomOpen(id: RoomId, role: DeskRole | null): boolean {
 export function StudioChrome({
   room,
   role,
-  wide = false,
 }: {
   room: RoomId;
   role: DeskRole | null;
   wide?: boolean;
 }) {
   const clock = useClock();
+  const live = useLiveBrand();
   const open = rooms.filter((item) => item.id === room || roomOpen(item.id, role));
 
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-canvas/95 backdrop-blur-md">
-      <div className={cn("mx-auto w-full px-4 sm:px-6", wide ? "max-w-6xl" : "max-w-5xl")}>
+      <div className="mx-auto w-full px-4 sm:px-6 lg:px-8">
         <div className="flex h-14 items-center justify-between gap-3">
           <Link to="/" className="flex min-w-0 items-center gap-2 text-ink">
             <Mark className="h-7 w-7 shrink-0 text-signal" />
-            <span className="truncate font-display text-lg leading-none tracking-tight">{brand.productName}</span>
+            <span className="truncate font-display text-lg leading-none tracking-tight">{live.productName}</span>
           </Link>
           <div className="flex shrink-0 items-center gap-1 sm:gap-2">
             <span className="hidden px-2 text-sm tabular-nums text-muted sm:inline">{clock}</span>
@@ -86,6 +86,7 @@ export function StudioChrome({
 
 export type RegieSection =
   | "ausgabe"
+  | "bereiche"
   | "programm"
   | "musikplan"
   | "kalender"
@@ -93,7 +94,9 @@ export type RegieSection =
   | "sender"
   | "playlists"
   | "moderation"
-  | "nutzer";
+  | "nutzer"
+  | "debug"
+  | "marke";
 
 const regieGroups: { id: string; label: string; items: { id: RegieSection; no: string; label: string }[] }[] = [
   {
@@ -101,32 +104,35 @@ const regieGroups: { id: string; label: string; items: { id: RegieSection; no: s
     label: "Ton",
     items: [
       { id: "ausgabe", no: "01", label: "Ausgabe" },
-      { id: "programm", no: "02", label: "Programm" },
+      { id: "bereiche", no: "02", label: "Bereiche" },
+      { id: "programm", no: "03", label: "Programm" },
     ],
   },
   {
     id: "tag",
     label: "Tag",
     items: [
-      { id: "musikplan", no: "03", label: "Musikplan" },
-      { id: "kalender", no: "04", label: "Kalender" },
+      { id: "musikplan", no: "04", label: "Musikplan" },
+      { id: "kalender", no: "05", label: "Kalender" },
     ],
   },
   {
     id: "quellen",
     label: "Quellen",
     items: [
-      { id: "dienste", no: "05", label: "Dienste" },
-      { id: "sender", no: "06", label: "Sender" },
-      { id: "playlists", no: "07", label: "Playlists" },
+      { id: "dienste", no: "06", label: "Dienste" },
+      { id: "sender", no: "07", label: "Sender" },
+      { id: "playlists", no: "08", label: "Playlists" },
     ],
   },
   {
     id: "haus",
     label: "Haus",
     items: [
-      { id: "moderation", no: "08", label: "Moderation" },
-      { id: "nutzer", no: "09", label: "Nutzer" },
+      { id: "moderation", no: "09", label: "Moderation" },
+      { id: "nutzer", no: "10", label: "Nutzer" },
+      { id: "debug", no: "11", label: "Debug" },
+      { id: "marke", no: "12", label: "Marke" },
     ],
   },
 ];
@@ -205,7 +211,7 @@ function ChannelButton({
         active ? "bg-surface-2 text-ink" : "text-muted",
       )}
     >
-      <span className={cn("w-6 font-display text-base tabular-nums", active ? "text-signal" : "text-subtle")}>
+      <span className={cn("w-8 font-display text-base tabular-nums", active ? "text-signal" : "text-subtle")}>
         {item.no}
       </span>
       {item.label}

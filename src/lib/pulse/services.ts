@@ -195,14 +195,57 @@ export async function spotifyToken(clientId: string, secret: string): Promise<st
   return body.access_token;
 }
 
-export async function searchSpotify(query: string, clientId: string, secret: string): Promise<TrackInput[]> {
-  if (!clientId || !secret) {
-    throw new Error("Spotify ist noch nicht verbunden. In der Regie unter Dienste Client-ID und Geheimnis eintragen.");
+/** Nutzer-Token aus dem gespeicherten Refresh. Leer, wenn kein Konto hängt. */
+export async function spotifyAccess(link: { clientId: string; secret: string; refreshToken: string }): Promise<string> {
+  if (!link.refreshToken || !link.clientId) return "";
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: link.refreshToken,
+    client_id: link.clientId,
+  });
+  if (link.secret) body.set("client_secret", link.secret);
+  const res = await fetch("https://accounts.spotify.com/api/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body,
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) return "";
+  const json = (await res.json()) as { access_token?: string };
+  return json.access_token ?? "";
+}
+
+export async function searchSpotify(
+  query: string,
+  clientId: string,
+  secret: string,
+  accessToken = "",
+): Promise<TrackInput[]> {
+  let token = accessToken;
+  if (!token && clientId && secret) {
+    try {
+      token = await spotifyToken(clientId, secret);
+    } catch {
+      token = "";
+    }
   }
-  const token = await spotifyToken(clientId, secret);
+  if (token) {
+    try {
+      const hits = await spotifyCatalog(query, token);
+      const playable = await mapPool(hits.slice(0, 5), 2, (hit) => attachSharedAudio(hit));
+      const ready = playable.filter((hit): hit is TrackInput => hit !== null);
+      if (ready.length > 0) return ready;
+    } catch {
+      // gemeinsamer Katalog darunter
+    }
+  }
+  return sharedCatalog(query);
+}
+
+async function spotifyCatalog(query: string, token: string): Promise<TrackInput[]> {
   const url = new URL("https://api.spotify.com/v1/search");
   url.searchParams.set("type", "track");
-  url.searchParams.set("limit", "8");
+  url.searchParams.set("limit", "5");
   url.searchParams.set("q", query);
   const res = await fetch(url, {
     headers: { authorization: `Bearer ${token}` },
@@ -222,28 +265,110 @@ export async function searchSpotify(query: string, clientId: string, secret: str
       }[];
     };
   };
-  const items = body.tracks?.items ?? [];
-  const hits = await Promise.all(
-    items.map(async (item) => {
-      const title = clip(item.name, 140);
-      const artist = clip(item.artists?.map((person) => person.name).filter(Boolean).join(", "), 140);
-      if (!title || !artist || !item.id) return null;
-      let preview = https(item.preview_url);
-      if (!preview) preview = await itunesPreview(artist, title);
-      return track({
+  return (body.tracks?.items ?? []).flatMap((item) => {
+    const title = clip(item.name, 140);
+    const artist = clip(item.artists?.map((person) => person.name).filter(Boolean).join(", "), 140);
+    if (!title || !artist || !item.id) return [];
+    return [
+      track({
         title,
         artist,
         album: clip(item.album?.name, 160),
         artworkUrl: https(item.album?.images?.[0]?.url),
-        previewUrl: preview,
+        previewUrl: https(item.preview_url),
         externalId: item.id,
         explicit: item.explicit === true,
-        durationMs: preview && !item.preview_url ? 30_000 : Math.max(15_000, item.duration_ms || 180_000),
+        durationMs: Math.max(15_000, item.duration_ms || 180_000),
         source: "spotify",
-      });
-    }),
-  );
-  return hits.flatMap((hit) => (hit ? [hit] : []));
+      }),
+    ];
+  });
+}
+
+/** Voller Titel über dieselbe Quelle in jedem Browser. Vorschau nur, wenn nichts Längeres da ist. */
+async function attachSharedAudio(hit: TrackInput): Promise<TrackInput | null> {
+  const video = await firstVideo(`${hit.artist} ${hit.title}`);
+  if (video?.externalId) {
+    return track({
+      title: hit.title,
+      artist: hit.artist,
+      album: hit.album || "Spotify",
+      artworkUrl: hit.artworkUrl || video.artworkUrl,
+      externalId: video.externalId,
+      explicit: hit.explicit,
+      durationMs: video.durationMs || hit.durationMs,
+      source: "youtube",
+    });
+  }
+  if (!hit.previewUrl) {
+    const preview = await itunesPreview(hit.artist, hit.title);
+    if (!preview) return null;
+    return track({ ...hit, previewUrl: preview, durationMs: 30_000, source: "spotify" });
+  }
+  return track({ ...hit, durationMs: 30_000, source: "spotify" });
+}
+
+async function firstVideo(query: string): Promise<TrackInput | null> {
+  try {
+    const hits = await Promise.race([
+      searchYoutube(query, ""),
+      new Promise<TrackInput[]>((resolve) => setTimeout(() => resolve([]), 4500)),
+    ]);
+    return hits.find((item) => item.durationMs >= 75_000 && item.durationMs <= 12 * 60_000) ?? hits[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function sharedCatalog(query: string): Promise<TrackInput[]> {
+  const songs = await itunesSongs(query);
+  if (songs.length === 0) throw new Error("Spotify-Suche gerade nicht erreichbar.");
+  const playable = await mapPool(songs, 2, (song) => attachSharedAudio(song));
+  const ready = playable.filter((hit): hit is TrackInput => hit !== null);
+  if (ready.length === 0) throw new Error("Keiner der Titel ließ sich abspielen.");
+  return ready;
+}
+
+async function itunesSongs(query: string): Promise<TrackInput[]> {
+  try {
+    const url = new URL("https://itunes.apple.com/search");
+    url.searchParams.set("term", query);
+    url.searchParams.set("entity", "song");
+    url.searchParams.set("limit", "5");
+    const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) return [];
+    const body = (await res.json()) as {
+      results?: {
+        trackName?: string;
+        artistName?: string;
+        collectionName?: string;
+        artworkUrl100?: string;
+        previewUrl?: string;
+        trackExplicitness?: string;
+        trackId?: number;
+      }[];
+    };
+    return (body.results ?? []).flatMap((row) => {
+      const title = clip(row.trackName, 140);
+      const artist = clip(row.artistName, 140);
+      if (!title || !artist) return [];
+      return [
+        track({
+          title,
+          artist,
+          album: clip(row.collectionName, 160),
+          artworkUrl: https(row.artworkUrl100?.replace("100x100", "300x300")),
+          previewUrl: https(row.previewUrl),
+          externalId: row.trackId ? `itunes:${row.trackId}` : "",
+          explicit: row.trackExplicitness === "explicit",
+          durationMs: 30_000,
+          source: "spotify",
+        }),
+      ];
+    });
+  } catch {
+    return [];
+  }
 }
 
 async function itunesPreview(artist: string, title: string): Promise<string> {
@@ -372,7 +497,7 @@ function durationFromLabel(label: string): number {
   return total > 0 ? total * 1000 : 0;
 }
 
-/** Öffentliche Spotify-Playlist über die Embed-Seite. Ton über YouTube, sonst 30s-Vorschau. */
+/** Öffentliche Spotify-Playlist über die Embed-Seite. Titel werden nach YouTube übersetzt, sonst 30s-Vorschau. */
 export async function spotifyPlaylist(playlistId: string): Promise<{ title: string; tracks: TrackInput[] }> {
   const id = playlistId.trim();
   if (!/^[A-Za-z0-9]{10,40}$/.test(id)) throw new Error("Das ist keine Spotify-Playlist.");
@@ -383,20 +508,29 @@ export async function spotifyPlaylist(playlistId: string): Promise<{ title: stri
   if (!res.ok) throw new Error("Spotify-Playlist gerade nicht erreichbar.");
   const html = await res.text();
   const raw = html.match(/<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/)?.[1];
-  if (!raw) throw new Error("Spotify hat die Playlist nicht hergegeben.");
-  let data: unknown;
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    throw new Error("Spotify hat die Playlist nicht hergegeben.");
-  }
-  const title = clip(playlistName(data, 0), 60) || "Spotify-Playlist";
   const rows: { title: string; artist: string; durationMs: number; explicit: boolean; id: string }[] = [];
-  collectSpotify(data, 0, rows);
-  if (rows.length === 0) throw new Error("Die Spotify-Playlist ist leer oder nicht öffentlich.");
-  const tracks = await mapPool(rows.slice(0, 8), 3, (row) => spotifyRowToTrack(row));
+  if (raw) {
+    try {
+      collectSpotify(JSON.parse(raw) as unknown, 0, rows);
+    } catch {
+      rows.length = 0;
+    }
+  }
+  if (rows.length === 0) {
+    for (const row of rowsFromSpotifyHtml(html)) rows.push(row);
+  }
+  if (rows.length === 0) throw new Error("Spotify hat die Playlist nicht hergegeben.");
+  let title = "Spotify-Playlist";
+  if (raw) {
+    try {
+      title = clip(playlistName(JSON.parse(raw) as unknown, 0), 60) || title;
+    } catch {
+      title = "Spotify-Playlist";
+    }
+  }
+  const tracks = await mapPool(rows.slice(0, 12), 3, (row) => spotifyRowToTrack(row));
   const playable = tracks.filter((item): item is TrackInput => item !== null);
-  if (playable.length === 0) throw new Error("Keiner der Titel ließ sich abspielen.");
+  if (playable.length === 0) throw new Error("Keiner der Titel ließ sich auf YouTube oder als Vorschau finden.");
   return { title, tracks: playable };
 }
 
@@ -466,7 +600,7 @@ function collectSpotify(
   depth: number,
   out: { title: string; artist: string; durationMs: number; explicit: boolean; id: string }[],
 ) {
-  if (node == null || depth > 12 || out.length >= 12) return;
+  if (node == null || depth > 12 || out.length >= 16) return;
   if (Array.isArray(node)) {
     for (const item of node) collectSpotify(item, depth + 1, out);
     return;
@@ -487,6 +621,32 @@ function collectSpotify(
     });
   }
   for (const value of Object.values(rec)) collectSpotify(value, depth + 1, out);
+}
+
+function rowsFromSpotifyHtml(html: string): { title: string; artist: string; durationMs: number; explicit: boolean; id: string }[] {
+  const out: { title: string; artist: string; durationMs: number; explicit: boolean; id: string }[] = [];
+  const seen = new Set<string>();
+  const push = (id: string, title: string, artist: string) => {
+    if (seen.has(id) || out.length >= 16) return;
+    const cleanTitle = clip(unescapeSpotify(title), 140);
+    const cleanArtist = clip(unescapeSpotify(artist), 140);
+    if (!/^[A-Za-z0-9]{10,40}$/.test(id) || !cleanTitle || !cleanArtist) return;
+    seen.add(id);
+    out.push({ title: cleanTitle, artist: cleanArtist, durationMs: 0, explicit: false, id });
+  };
+  const uriFirst = /"uri":"spotify:track:([A-Za-z0-9]{22})"[\s\S]{0,700}?"title":"((?:\\.|[^"\\])*)"[\s\S]{0,350}?"subtitle":"((?:\\.|[^"\\])*)"/g;
+  const titleFirst = /"title":"((?:\\.|[^"\\])*)"[\s\S]{0,350}?"subtitle":"((?:\\.|[^"\\])*)"[\s\S]{0,700}?"uri":"spotify:track:([A-Za-z0-9]{22})"/g;
+  for (const match of html.matchAll(uriFirst)) push(match[1] ?? "", match[2] ?? "", match[3] ?? "");
+  for (const match of html.matchAll(titleFirst)) push(match[3] ?? "", match[1] ?? "", match[2] ?? "");
+  return out;
+}
+
+function unescapeSpotify(value: string): string {
+  return value
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)))
+    .replace(/\\n/g, " ")
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, "\\");
 }
 
 async function mapPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {

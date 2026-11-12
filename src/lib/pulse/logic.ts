@@ -1,7 +1,7 @@
 /**
  * Reine Regeln für Queue, Voting und Programm.
  * Kein Datenbankzugriff — dieselbe Logik für Server und Oberfläche.
- * Was die Funktionen entscheiden, steht in der README unter Stimmen, Filter und Aufräumen.
+ * Was die Funktionen entscheiden, steht in der README unter Stimmen, Filter, Bereiche und Gleichlauf.
  */
 
 export const MAX_OPEN_WISHES = 3;
@@ -97,20 +97,20 @@ export function clampPruneAt(value: number): number {
   return Math.max(4, Math.min(40, Math.round(value)));
 }
 
-/** Nächster Moderations-Slot, strikt in der Zukunft. */
+/** Nächster Moderations-Slot, strikt in der Zukunft, in Berliner Bürozeit. */
 export function nextSlot(slots: string, from = new Date()): Date | null {
   const times = slots
     .split(",")
     .map((part) => part.trim())
     .filter((part) => /^\d{2}:\d{2}$/.test(part));
   if (times.length === 0) return null;
+  const today = berlinParts(from);
   const candidates: Date[] = [];
   for (const dayOffset of [0, 1]) {
+    const day = addCalendarDays(today.year, today.monthIndex, today.day, dayOffset);
     for (const time of times) {
       const [hh, mm] = time.split(":").map(Number);
-      const when = new Date(from);
-      when.setDate(when.getDate() + dayOffset);
-      when.setHours(hh ?? 0, mm ?? 0, 0, 0);
+      const when = berlinWallTime(day.year, day.monthIndex, day.day, hh ?? 0, mm ?? 0, 0);
       if (when.getTime() > from.getTime() + 15_000) candidates.push(when);
     }
   }
@@ -280,19 +280,85 @@ function icsDate(value: string): Date | null {
   const minute = Number(match[5] ?? "0");
   const second = Number(match[6] ?? "0");
   if (match[7]) return new Date(Date.UTC(year, month, day, hour, minute, second));
-  return new Date(year, month, day, hour, minute, second);
+  return berlinWallTime(year, month, day, hour, minute, second);
+}
+
+/** Schwebende ICS-Zeiten sind Bürozeit in Berlin, nicht die Zeitzone des Servers. */
+function berlinWallTime(year: number, monthIndex: number, day: number, hour: number, minute: number, second: number): Date {
+  const wall = Date.UTC(year, monthIndex, day, hour, minute, second);
+  let utc = wall;
+  for (let pass = 0; pass < 2; pass += 1) {
+    utc = wall - berlinOffset(new Date(utc));
+  }
+  return new Date(utc);
+}
+
+function berlinParts(instant: Date): { year: number; monthIndex: number; day: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Berlin",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(instant);
+  const pick = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === type)?.value);
+  return { year: pick("year"), monthIndex: pick("month") - 1, day: pick("day") };
+}
+
+/** Kalendertage, ohne Zeitzone. monthIndex ist 0-basiert. */
+function addCalendarDays(year: number, monthIndex: number, day: number, add: number) {
+  const utc = new Date(Date.UTC(year, monthIndex, day + add));
+  return { year: utc.getUTCFullYear(), monthIndex: utc.getUTCMonth(), day: utc.getUTCDate() };
+}
+
+function berlinOffset(instant: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Berlin",
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(instant);
+  const pick = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === type)?.value);
+  const asUtc = Date.UTC(pick("year"), pick("month") - 1, pick("day"), pick("hour"), pick("minute"), pick("second"));
+  return asUtc - instant.getTime();
+}
+
+function hasStem(hay: string, stem: string, skipTail?: string): boolean {
+  const tail = skipTail ? `(?!${skipTail})` : "";
+  return new RegExp(`(?<![a-z0-9äöüß])${stem}${tail}`, "i").test(hay);
+}
+
+function hasWord(hay: string, word: string): boolean {
+  return new RegExp(`(?<![a-z0-9äöüß])${word}(?![a-z0-9äöüß])`, "i").test(hay);
 }
 
 /**
  * Freitext aus Outlook oder der Regie wird zu Lautstärke und Wunscherlaubnis.
- * Ohne Hinweis bleibt beides unverändert (null).
+ * „laut“ in anderen Wörtern, „call“ in „callback“ und „event“ in „eventuell“ zählen nicht.
+ * „Feierabend“ ist kein Laut-Hinweis. Ohne Hinweis bleibt beides null.
  */
 export function wishFromText(text: string): { volume: number | null; wishesEnabled: boolean | null; wishNote: string } {
   const hay = text.toLowerCase();
   let volume: number | null = null;
   let wishesEnabled: boolean | null = null;
-  if (/leise|flüster|fluester|hintergrund|meeting|besprechung|call|jour fixe/.test(hay)) volume = 24;
-  if (/laut|party|feier|event|mittag/.test(hay)) volume = 58;
+  if (
+    hasStem(hay, "leise") ||
+    hasStem(hay, "flüster") ||
+    hasStem(hay, "fluester") ||
+    hasWord(hay, "hintergrund") ||
+    hasWord(hay, "meeting") ||
+    hasWord(hay, "besprechung") ||
+    hasWord(hay, "call") ||
+    hay.includes("jour fixe")
+  ) {
+    volume = 24;
+  }
+  if (hasStem(hay, "laut") || hasStem(hay, "party") || hasStem(hay, "feier", "abend") || hasStem(hay, "event", "uell") || hasStem(hay, "mittag")) {
+    volume = 58;
+  }
   if (/keine wünsche|wuensche aus|wünsche aus|wunschfrei/.test(hay)) wishesEnabled = false;
   if (/wünsche an|wuensche an|wunschbox/.test(hay)) wishesEnabled = true;
   return { volume, wishesEnabled, wishNote: text.trim().slice(0, 240) };
@@ -340,4 +406,63 @@ export function youtubePlaylistId(raw: string): string | null {
   } catch {
     return null;
   }
+}
+
+export type SyncNudge = { rate: number; seekTo: number | null };
+
+/**
+ * Abstand der lokalen Wiedergabe zur gemeinsamen Sendung.
+ *
+ * Allein (kein zweites Gerät im selben Bereich): unter 80 ms nichts.
+ * Bis 1,5 s nur ein leises Tempo zwischen 0,988 und 1,012. Darüber ein Sprung.
+ * YouTube kann kein Feintempo und springt allein erst ab 1,2 s.
+ *
+ * In einer Gruppe (mindestens ein weiteres Gerät desselben Bereichs ist online):
+ * unter 40 ms nichts, bis 0,22 s ein Tempo zwischen 0,96 und 1,04, darüber
+ * sofort springen. 0,8 s Versatz hört man im Raum. YouTube springt in der
+ * Gruppe ab 0,18 s. Livestreams bleiben unangetastet.
+ */
+export function syncNudge(
+  localSeconds: number,
+  targetSeconds: number,
+  options?: { live?: boolean; fractionalRate?: boolean; grouped?: boolean },
+): SyncNudge {
+  const hold: SyncNudge = { rate: 1, seekTo: null };
+  if (options?.live) return hold;
+  if (!Number.isFinite(localSeconds) || !Number.isFinite(targetSeconds) || targetSeconds < 0) return hold;
+  const error = localSeconds - targetSeconds;
+  const abs = Math.abs(error);
+  const grouped = options?.grouped === true;
+  const quiet = grouped ? 0.04 : 0.08;
+  const jump = grouped ? 0.22 : 1.5;
+  if (abs < quiet) return hold;
+  if (options?.fractionalRate === false) {
+    const youtubeJump = grouped ? 0.18 : 1.2;
+    return abs > youtubeJump ? { rate: 1, seekTo: targetSeconds } : hold;
+  }
+  if (abs > jump) return { rate: 1, seekTo: targetSeconds };
+  const t = Math.min(1, (abs - quiet) / (jump - quiet));
+  const minDelta = grouped ? 0.015 : 0.004;
+  const maxDelta = grouped ? 0.04 : 0.012;
+  const delta = minDelta + t * (maxDelta - minDelta);
+  const rate = error > 0 ? 1 - delta : 1 + delta;
+  const limit = grouped ? 0.04 : 0.012;
+  const clamped = Math.min(1 + limit, Math.max(1 - limit, rate));
+  return { rate: Math.round(clamped * 1000) / 1000, seekTo: null };
+}
+
+/** Sekunden seit dem gemeinsamen Start der Sendung. */
+export function stationSeconds(startedAt: string | null | undefined, now = Date.now()): number | null {
+  if (!startedAt) return null;
+  const t = new Date(startedAt).getTime();
+  if (!Number.isFinite(t)) return null;
+  return Math.max(0, (now - t) / 1000);
+}
+
+/** Ein Gerät gilt als verbunden, wenn es in den letzten 12 Sekunden gemeldet hat. */
+export const DEVICE_ONLINE_MS = 12_000;
+
+export function deviceOnline(lastSeen: string, now = Date.now()): boolean {
+  const t = new Date(lastSeen).getTime();
+  return Number.isFinite(t) && now - t >= 0 && now - t < DEVICE_ONLINE_MS;
 }

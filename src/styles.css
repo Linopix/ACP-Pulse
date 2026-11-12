@@ -175,8 +175,19 @@
 }
 
 select,
-input[type="datetime-local"] {
+input[type="datetime-local"],
+input[type="color"] {
   color-scheme: dark;
+}
+
+input[type="datetime-local"] {
+  width: 100%;
+  max-width: 18rem;
+}
+
+.desk-form {
+  width: 100%;
+  max-width: 48rem;
 }
 
 input[type="range"] {

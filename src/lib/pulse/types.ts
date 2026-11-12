@@ -90,6 +90,8 @@ export type StationSnapshot = {
   piperName: string;
   youtubeOn: boolean;
   spotifyOn: boolean;
+  /** Anzeigename, wenn ein Spotify-Konto an der Sendung hängt. */
+  spotifyAccount: string;
 };
 
 export type RuleRecord = {
@@ -102,6 +104,8 @@ export type RuleRecord = {
   explicitFilter: FilterMode | null;
   note: string;
   active: boolean;
+  zoneId: number | null;
+  zoneName: string;
 };
 
 export type PlaylistTrack = TrackInput & { id: number; position: number };
@@ -196,6 +200,8 @@ export type PlanBlock = {
   talkPoints: string;
   stationId: number | null;
   stationName: string;
+  zoneId: number | null;
+  zoneName: string;
   source: "manual" | "o365";
   active: boolean;
   past: boolean;
@@ -216,12 +222,13 @@ export type PlanInput = {
   djBrief: string;
   talkPoints: string;
   stationId: number | null;
+  zoneId: number | null;
 };
 
 export type ServiceId = "spotify" | "youtube" | "o365" | "piper";
 
 export type ServiceState = {
-  spotify: { enabled: boolean; clientId: string; secretSet: boolean; detail: string };
+  spotify: { enabled: boolean; clientId: string; secretSet: boolean; accountName: string; detail: string };
   youtube: { enabled: boolean; keySet: boolean; detail: string };
   o365: { enabled: boolean; tenant: string; clientId: string; mailbox: string; secretSet: boolean; detail: string };
   piper: { enabled: boolean; voice: PiperVoiceId; endpoint: string; detail: string };
@@ -251,8 +258,56 @@ export type AdminSnapshot = {
   slots: RelaySlot[];
   plan: PlanBlock[];
   services: ServiceState;
+  zones: AudioZone[];
+  brand: BrandSettings;
   nextSlot: string | null;
   suggestedReceiver: string;
+};
+
+export type BrandSettings = {
+  companyName: string;
+  productName: string;
+  tagline: string;
+  signal: string;
+};
+
+export type AudioZone = {
+  id: number;
+  name: string;
+  volume: number;
+};
+
+export type AudioDevice = {
+  id: string;
+  name: string;
+  zoneId: number | null;
+  userName: string;
+  room: string;
+  lastSeen: string;
+  online: boolean;
+  hearing: boolean;
+  userAgent: string;
+  detail: string;
+};
+
+export type AreaSnapshot = {
+  zones: AudioZone[];
+  devices: AudioDevice[];
+  air: PlaybackView;
+  volume: number;
+  outputTarget: OutputTarget;
+  outputLabel: string;
+  receiverUrl: string;
+};
+
+export type DeviceTouch = {
+  volume: number;
+  wishes: boolean;
+  /** Mindestens ein weiteres Gerät desselben Bereichs ist gerade online. */
+  syncTight: boolean;
+  zoneId: number | null;
+  zoneName: string;
+  deviceName: string;
 };
 
 export type RuleInput = {
@@ -264,12 +319,23 @@ export type RuleInput = {
   wishesEnabled: boolean | null;
   explicitFilter: FilterMode | null;
   note: string;
+  zoneId: number | null;
 };
 
 export type ProbeLine = {
   label: string;
   ok: boolean;
   detail: string;
+};
+
+export type SourceProbe = {
+  ok: boolean;
+  detail: string;
+};
+
+export type HouseImport = {
+  snapshot: AdminSnapshot;
+  note: string;
 };
 
 export type OutputProbe = {

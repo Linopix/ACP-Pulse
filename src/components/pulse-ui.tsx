@@ -1,7 +1,7 @@
 /** Gemeinsame Flächen. Farben und Schriften kommen aus brand.ts, nicht von hier. */
 import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { brand } from "@/brand";
+import { useLiveBrand } from "@/components/pulse-brand";
 import { cn } from "@/lib/utils";
 
 export function Mark({ className }: { className?: string }) {
@@ -28,11 +28,12 @@ export function Mark({ className }: { className?: string }) {
 }
 
 export function TopBar({ children }: { children?: ReactNode }) {
+  const live = useLiveBrand();
   return (
     <header className="flex items-center justify-between gap-3 px-4 py-4 sm:px-6">
       <Link to="/" className="flex min-w-0 items-center gap-3 text-ink">
         <Mark className="h-8 w-8 shrink-0 text-signal" />
-        <span className="truncate font-display text-xl leading-none tracking-tight">{brand.productName}</span>
+        <span className="truncate font-display text-xl leading-none tracking-tight">{live.productName}</span>
       </Link>
       <div className="flex shrink-0 items-center gap-2 sm:gap-3">{children}</div>
     </header>
@@ -98,8 +99,8 @@ export function Panel({
   return (
     <section className={cn("rise min-w-0 rounded-xl border border-line bg-surface p-4 sm:p-6", className)}>
       {title ? (
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="font-display text-xl leading-none tracking-tight text-ink">{title}</h2>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="text-sm font-medium text-muted">{title}</h2>
           {action}
         </div>
       ) : null}
@@ -113,6 +114,7 @@ export function formatWhen(iso: string | null | undefined): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleString("de-DE", {
+    timeZone: "Europe/Berlin",
     weekday: "short",
     day: "2-digit",
     month: "short",
@@ -122,7 +124,11 @@ export function formatWhen(iso: string | null | undefined): string {
 }
 
 export function clockLabel(now: number): string {
-  return new Date(now).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  return new Date(now).toLocaleTimeString("de-DE", {
+    timeZone: "Europe/Berlin",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export function errorText(error: unknown): string {
@@ -156,8 +162,10 @@ export function Segment<T extends string>({
   options: readonly { id: T; label: string }[];
   label: string;
 }) {
+  const columns =
+    options.length <= 1 ? "grid-cols-1" : options.length === 2 ? "grid-cols-2" : options.length === 3 ? "grid-cols-3" : "grid-cols-2";
   return (
-    <div role="group" aria-label={label} className="flex flex-wrap gap-1 rounded-lg bg-surface-2 p-1">
+    <div role="group" aria-label={label} className={cn("grid gap-1 rounded-lg bg-surface-2 p-1", columns)}>
       {options.map((option) => {
         const active = option.id === value;
         return (
@@ -167,8 +175,8 @@ export function Segment<T extends string>({
             aria-pressed={active}
             onClick={() => onChange(option.id)}
             className={cn(
-              "h-11 min-w-28 flex-1 rounded-md px-3 text-sm font-medium transition-colors duration-150",
-              active ? "bg-signal text-signal-ink" : "text-muted hover:text-ink",
+              "min-h-11 min-w-0 rounded-md px-2 py-2 text-center text-sm font-medium leading-tight transition-colors duration-150",
+              active ? "bg-signal text-signal-ink" : "text-muted hover:bg-canvas hover:text-ink",
             )}
           >
             {option.label}

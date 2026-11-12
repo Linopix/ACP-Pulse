@@ -13,9 +13,10 @@ import {
 } from "@/lib/pulse/api";
 import type { DeskSnapshot, PlanBlock } from "@/lib/pulse/types";
 import { piperLine, speakPiper } from "@/lib/pulse/voice";
-import { Button, Eq, Field, Panel, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
+import { Button, Field, Panel, errorText, fieldClass, formatWhen } from "@/components/pulse-ui";
 import { GuidePanel } from "@/components/pulse-guide";
-import { CueTarget, StudioChrome } from "@/components/pulse-nav";
+import { CueRail, CueTarget, StudioChrome } from "@/components/pulse-nav";
+import { RoomListen } from "@/components/pulse-listen";
 import { cn } from "@/lib/utils";
 
 export function Desk() {
@@ -47,8 +48,8 @@ export function Desk() {
 
   return (
     <div className="flex min-h-screen w-full flex-col">
-      <StudioChrome room="pult" role={data?.me.role ?? "dj"} />
-      <main className="pb-chrome mx-auto grid w-full min-w-0 max-w-6xl grid-cols-1 gap-4 px-4 py-4 sm:px-6">
+      <StudioChrome room="pult" role={data?.me.role ?? null} wide />
+      <main className="pb-chrome mx-auto grid w-full min-w-0 grid-cols-1 gap-4 px-4 py-4 sm:px-6 lg:px-8">
         {!data && !error ? <p className="text-muted">Pult wird geladen.</p> : null}
         {error && !data ? (
           <Panel title="Kein Zugang">
@@ -59,6 +60,7 @@ export function Desk() {
           <>
             <GuidePanel role={data.me.role === "admin" ? "admin" : "dj"} />
             <AirStrip data={data} now={now} />
+            <CueRail />
             <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(18rem,0.85fr)]">
               <div className="grid min-w-0 gap-4">
                 <CueTarget id="mikro">
@@ -93,41 +95,36 @@ export function Desk() {
 function AirStrip({ data, now }: { data: DeskSnapshot; now: number }) {
   const air = data.air;
   const live = air.mode !== "idle";
-  const progress = air.startedAt
-    ? Math.min(1, Math.max(0, (now - new Date(air.startedAt).getTime()) / Math.max(1, air.durationMs)))
-    : 0;
-  const clock = new Date(now).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const elapsed = air.startedAt ? Math.max(0, now - new Date(air.startedAt).getTime()) : 0;
+  const progress = air.startedAt ? Math.min(1, elapsed / Math.max(1, air.durationMs)) : 0;
   return (
-    <section className="grid min-w-0 gap-4 overflow-hidden rounded-xl border border-line bg-surface px-4 py-5 sm:px-6">
-      <div className="flex items-start justify-between gap-4">
+    <section className="grid min-w-0 gap-3 overflow-hidden rounded-xl border border-line bg-surface px-4 py-3 sm:px-5">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
-          <Eq live={live} />
-          <div className="min-w-0">
-            <p className={cn("text-xs font-medium uppercase tracking-wide", live ? "text-signal" : "text-subtle")}>
-              {live ? "Auf Sendung" : "Pause"}
-            </p>
-            <p className="truncate text-sm text-muted">{live ? air.via : "Nichts läuft"}</p>
-          </div>
+          <span
+            className={cn(
+              "shrink-0 rounded-full px-2 py-1 text-xs font-medium",
+              live ? "bg-signal text-signal-ink" : "bg-surface-2 text-subtle",
+            )}
+          >
+            {live ? "ON AIR" : "PAUSE"}
+          </span>
+          <h1 className="truncate font-display text-xl tracking-tight sm:text-2xl">{air.title}</h1>
+          <p className="hidden min-w-0 truncate text-sm text-muted sm:block">{air.subtitle}</p>
         </div>
-        <div className="text-right">
-          <p className="font-display text-4xl tabular-nums leading-none tracking-tight text-ink">{clock}</p>
-          <p className="mt-2 text-xs tabular-nums text-subtle">Lautstärke {data.volume}</p>
-        </div>
-      </div>
-      <div className="min-w-0">
-        <p className="text-xs text-subtle">Jetzt</p>
-        <h1 className="mt-1 line-clamp-2 font-display text-4xl leading-none tracking-tight sm:text-5xl">{air.title}</h1>
-        <p className="mt-2 truncate text-muted">{air.subtitle}</p>
+        <p className="shrink-0 text-sm tabular-nums text-subtle">
+          {clock(elapsed)}
+          {air.durationMs > 0 ? ` / ${clock(air.durationMs)}` : ""}
+        </p>
       </div>
       <div className="air-meter" aria-hidden="true">
         <span style={{ width: `${Math.round(progress * 100)}%` }} />
       </div>
-      <div className="flex items-baseline justify-between gap-3 text-xs text-subtle">
-        <span className="shrink-0">{data.outputLabel}</span>
-        <span className="min-w-0 truncate">
-          {data.upNext[0] ? `Danach ${data.upNext[0].title}` : "Keine Wünsche in der Queue"}
-        </span>
-      </div>
+      <p className="truncate text-xs text-subtle">
+        {data.outputLabel}
+        {data.upNext[0] ? ` · Danach ${data.upNext[0].title}` : " · Keine Wünsche in der Queue"}
+      </p>
+      <RoomListen room="pult" air={air} fallbackVolume={data.volume} />
     </section>
   );
 }
@@ -360,12 +357,23 @@ function Mic({ onSaved }: { onSaved: (data: DeskSnapshot) => void }) {
 
   return (
     <section className="grid min-w-0 gap-4 overflow-hidden rounded-xl border border-line bg-surface p-4 sm:p-6">
-      <div className="flex items-end justify-between gap-3">
-        <div>
+      <div className="flex min-w-0 items-center gap-4">
+        <button
+          type="button"
+          aria-pressed={recording}
+          aria-label={recording ? "Stopp" : "Mikrofon öffnen"}
+          onClick={() => (recording ? stop() : void begin())}
+          className="grid h-20 w-20 shrink-0 place-items-center rounded-full bg-signal text-signal-ink"
+        >
+          <span className={cn("block rounded-full bg-signal-ink", recording ? "h-5 w-5 rounded-sm" : "h-6 w-6")} />
+        </button>
+        <div className="min-w-0">
           <p className="text-sm text-muted">Mikrofon</p>
           <h2 className="font-display text-3xl tracking-tight">{recording ? "Aufnahme läuft" : "Bereit"}</h2>
+          <p className="text-sm text-muted">
+            {recording || blob ? `${seconds}s` : "Antippen, höchstens 45 Sekunden."}
+          </p>
         </div>
-        <p className="font-display text-4xl tabular-nums tracking-tight">{recording || blob ? `${seconds}s` : "45s"}</p>
       </div>
       <div className="flex h-16 min-w-0 items-end gap-1 overflow-hidden" aria-hidden="true">
         {levels.map((level, index) => (
@@ -379,15 +387,6 @@ function Mic({ onSaved }: { onSaved: (data: DeskSnapshot) => void }) {
       <Field label="Name der Durchsage">
         <input className={fieldClass} value={title} onChange={(event) => setTitle(event.target.value)} />
       </Field>
-      {recording ? (
-        <Button variant="danger" className="h-14 text-base" onClick={stop}>
-          Stopp
-        </Button>
-      ) : (
-        <Button className="h-14 text-base" onClick={() => void begin()}>
-          Mikrofon öffnen
-        </Button>
-      )}
       {blob ? (
         <div className="grid gap-3">
           <audio controls src={preview} className="w-full" />

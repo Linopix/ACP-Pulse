@@ -1,5 +1,5 @@
 /** Spotify, YouTube, Microsoft 365 und Piper. Geheimnisse gehen nur zum Server, nie zurück. */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { saveService, testService } from "@/lib/pulse/api";
 import { PIPER_VOICES, type PiperVoiceId } from "@/lib/pulse/logic";
@@ -28,12 +28,34 @@ function SpotifyCard({ services, onSaved }: { services: ServiceState; onSaved: (
   const [enabled, setEnabled] = useState(services.spotify.enabled);
   const [clientId, setClientId] = useState(services.spotify.clientId);
   const [secret, setSecret] = useState("");
+  const [notice, setNotice] = useState("");
+  const [redirectUri, setRedirectUri] = useState("");
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get("spotify") ?? "";
+    const texts: Record<string, string> = {
+      ok: "Spotify-Konto ist verbunden.",
+      fehlt: "Zuerst die Client-ID speichern. Ein Passwort wird hier nie abgefragt.",
+      state: "Die Verbindung wurde unterbrochen. Nochmal versuchen.",
+      token: "Spotify hat die Anmeldung nicht angenommen. Die Redirect-URI muss im Dashboard genau so stehen.",
+      recht: "Nur Pult und Regie verbinden das Konto.",
+      login: "Zuerst anmelden.",
+    };
+    setNotice(texts[code] ?? "");
+    setRedirectUri(`${window.location.origin}/api/spotify/callback`);
+    if (!code) return;
+    url.searchParams.delete("spotify");
+    const next = `${url.pathname}${url.search}`;
+    window.history.replaceState({}, "", next);
+  }, []);
   return (
     <Panel title="Spotify">
       <p className="mb-3 text-sm text-muted">
-        Dieselbe Suche wie die anderen Quellen. Client Credentials aus dem Spotify-Dashboard. Ohne Vorschau-URL nimmt die
-        Sendung eine 30-Sekunden-Datei, die Metadaten bleiben von Spotify.
+        Die Suche nimmt den Katalog, der Ton ist in jedem Browser derselbe und bleibt gleich. Das Konto hängt einmal über
+        Spotify selbst, nicht über ein Passwort hier.
+        {services.spotify.accountName ? ` Verbunden als ${services.spotify.accountName}.` : " Noch kein Konto verbunden."}
       </p>
+      {notice ? <p className="mb-3 text-sm text-ink">{notice}</p> : null}
       <Status detail={services.spotify.detail} />
       <form
         className="grid gap-3"
@@ -52,11 +74,17 @@ function SpotifyCard({ services, onSaved }: { services: ServiceState; onSaved: (
         <Field label="Client-ID">
           <input className={fieldClass} value={clientId} onChange={(event) => setClientId(event.target.value)} />
         </Field>
-        <Field label="Geheimnis" hint={services.spotify.secretSet ? "Gesetzt. Leer lassen, um es zu behalten." : "Noch keins."}>
+        <Field label="Geheimnis" hint={services.spotify.secretSet ? "Gesetzt. Leer lassen, um es zu behalten. Für PKCE freiwillig." : "Freiwillig, wenn die App PKCE erlaubt."}>
           <input className={fieldClass} type="password" value={secret} autoComplete="off" onChange={(event) => setSecret(event.target.value)} />
+        </Field>
+        <Field label="Redirect-URI" hint="Im Spotify-Dashboard unter der App eintragen.">
+          <input className={fieldClass} readOnly value={redirectUri} onFocus={(event) => event.currentTarget.select()} />
         </Field>
         <div className="flex flex-wrap gap-2">
           <Button type="submit">Speichern</Button>
+          <Button type="button" variant="line" onClick={() => window.location.assign("/api/spotify/start")}>
+            {services.spotify.accountName ? "Konto wechseln" : "Mit Spotify verbinden"}
+          </Button>
           <Button type="button" variant="line" onClick={() => void probe("spotify", onSaved)}>
             Verbindung prüfen
           </Button>
